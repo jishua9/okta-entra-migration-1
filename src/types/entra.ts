@@ -1,13 +1,3 @@
-export interface MigrationGroupRef {
-  id: string;
-  name?: string;
-}
-
-export interface MigrationUserRef {
-  id: string;
-  userName?: string;
-}
-
 export interface SamlAttributeStatement {
   name: string;
   namespace: string;
@@ -20,8 +10,6 @@ export interface EntraAppPayload {
   notes?: string;
   signOnMode?: string;
   oktaAppId?: string;
-  groups?: MigrationGroupRef[];
-  users?: MigrationUserRef[];
   samlAcsUrl?: string;
   samlEntityId?: string;
   samlRelayState?: string;

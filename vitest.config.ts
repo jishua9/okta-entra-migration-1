@@ -8,5 +8,6 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    env: { SQLITE_DB_PATH: ":memory:" },
   },
 });

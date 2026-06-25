@@ -42,6 +42,12 @@ export async function POST(req: Request) {
       }, { status: 500 });
     }
     const message = error instanceof Error ? error.message : "Unknown error";
+    recordMigration({
+      userId, oktaAppId: body.oktaAppId ?? "", oktaLabel: body.displayName,
+      signOnMode: body.signOnMode, status: "failed",
+      assignedGroups: 0, assignedUsers: 0,
+      warnings: [], errors: [message],
+    });
     logEvent("migrate.error", { userId, oktaAppId: body.oktaAppId, message });
     return NextResponse.json({ success: false, status: "failed", error: message }, { status: 500 });
   }

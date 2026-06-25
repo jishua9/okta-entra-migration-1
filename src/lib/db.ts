@@ -5,7 +5,8 @@ import fs from "fs";
 const DATA_DIR = path.join(process.cwd(), "data");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const db = new Database(path.join(DATA_DIR, "app.db"));
+const dbPath = process.env.SQLITE_DB_PATH ?? path.join(DATA_DIR, "app.db");
+const db = new Database(dbPath);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (

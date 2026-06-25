@@ -8,7 +8,7 @@ import {
   ResolvedAssignment,
 } from "@/types/entra";
 import { buildClaimsSchema } from "@/lib/saml-claims";
-import { keyToPem } from "@/lib/saml-cert";
+import { keyToPem, selectSigningCert, type KeyCredential } from "@/lib/saml-cert";
 import { withRetry } from "@/lib/graph-retry";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { classifyMatch } from "@/lib/assignment-match";
@@ -132,6 +132,21 @@ async function configureSaml(
     }
   }
 
+  // SAML relay state on the service principal.
+  if (payload.samlRelayState) {
+    try {
+      await withRetry(() =>
+        client.api(`/servicePrincipals/${spId}`).patch({
+          samlSingleSignOnSettings: { relayState: payload.samlRelayState },
+        }),
+      );
+    } catch (e) {
+      warnings.push(
+        `Could not set SAML relay state: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
   // Entity ID (identifier URI) on the application. Entra often rejects this for
   // unverified domains — that is a warning, not a rollback.
   if (payload.samlEntityId) {
@@ -207,7 +222,15 @@ async function configureSaml(
       }),
     );
 
-    if (cert.key) signingCertificate = keyToPem(cert.key);
+    let publicKey: string | undefined = cert.key;
+    if (!publicKey) {
+      const sp = await withRetry(() =>
+        client.api(`/servicePrincipals/${spId}`).select("keyCredentials").get(),
+      );
+      const found = selectSigningCert((sp.keyCredentials ?? []) as KeyCredential[]);
+      publicKey = found?.key;
+    }
+    if (publicKey) signingCertificate = keyToPem(publicKey);
     certExpiry = endDateTimeIso;
   } catch (e) {
     warnings.push(
