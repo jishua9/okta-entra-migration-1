@@ -19,3 +19,15 @@ Brainstormed 2026-06-25. Goal: make the Okta→Entra migration write-path correc
 7. **Signing cert (prescribed by docs):** `addTokenSigningCertificate` → activate via `preferredTokenSigningKeyThumbprint` → read back the `Verify`/`AsymmetricX509Cert` public key as PEM.
 
 Validated design doc to be written to `docs/plans/2026-06-25-entra-migration-redesign-design.md`. Fixes the defects in [[original-tool-known-bugs]].
+
+## Implementation status (as of 2026-06-25)
+
+Built on branch `entra-migration-redesign` via subagent-driven execution of `docs/plans/2026-06-25-entra-migration-redesign.md` (18 tasks). **Static verification all green: 27 unit tests, tsc clean, eslint clean, `next build` succeeds.** Final code review passed after fixes (relay-state propagation restored, audit row on all failure paths, cert read-back fallback wired, dead name-based payload fields removed, test DB isolated to in-memory via `SQLITE_DB_PATH`).
+
+Also fixed a **pre-existing** prod-build failure: `/login` used `useSearchParams()` without a `<Suspense>` boundary (broke `next build` on the original tool).
+
+**Outstanding before merge/use:**
+- Manual integration verification on a live Entra tenant + Okta org (no test env available at build time) — the real "does SSO work" gate.
+- Deferred minor items: client-side re-validation of an edited Entity ID; remove redundant `samlWarnings` alias.
+
+Branch not yet merged to `master`.
