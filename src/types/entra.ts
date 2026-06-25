@@ -26,6 +26,7 @@ export interface EntraAppPayload {
   samlEntityId?: string;
   samlRelayState?: string;
   samlAttributeStatements?: SamlAttributeStatement[];
+  confirmedPrincipals?: ConfirmedPrincipal[];
 }
 
 export interface MigrationResult {
@@ -42,7 +43,28 @@ export interface MigrationResult {
   samlCertExpiry?: string;
   samlClaimsMapped?: number;
   samlWarnings?: string[];
+  status?: "success" | "failed" | "partial";
+  rollbackPerformed?: boolean;
+  rollbackErrors?: string[];
 }
+
+// Pre-flight resolution
+export interface ResolvedAssignment {
+  sourceName: string;
+  status: "matched" | "ambiguous" | "not_found";
+  entraId?: string;
+  principalType: "group" | "user";
+  candidates?: { id: string; label: string }[];
+}
+
+export interface PreflightResult {
+  groups: ResolvedAssignment[];
+  users: ResolvedAssignment[];
+  entityIdValidation?: { accepted: boolean; reason?: string };
+}
+
+// What the migrate endpoint now receives: confirmed Entra principal IDs
+export interface ConfirmedPrincipal { entraId: string; principalType: "group" | "user"; label: string }
 
 export interface MigrationHistoryEntry {
   id: string;
