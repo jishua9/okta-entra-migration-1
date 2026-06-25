@@ -90,4 +90,5 @@ export interface MigrateConfirmPayload {
   replyUrls: string[];
   samlAcsUrl?: string;
   samlEntityId?: string;
+  confirmedPrincipals: ConfirmedPrincipal[];
 }

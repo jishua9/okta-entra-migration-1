@@ -2,8 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { OktaApp, OktaAppDetail } from "@/types/okta";
-import { MigrateConfirmPayload } from "@/types/entra";
+import {
+  MigrateConfirmPayload,
+  PreflightResult,
+  ResolvedAssignment,
+  ConfirmedPrincipal,
+} from "@/types/entra";
 import { getRedirectUris, getSamlSettings } from "@/lib/okta-utils";
+
+function principalKey(r: ResolvedAssignment): string {
+  return `${r.principalType}:${r.sourceName}`;
+}
 
 interface Props {
   app: OktaApp;
@@ -26,12 +35,42 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
   const [entraApps, setEntraApps] = useState<{ appId: string; displayName: string }[]>([]);
   const [checkingDuplicate, setCheckingDuplicate] = useState(true);
 
+  const [preflight, setPreflight] = useState<PreflightResult | null>(null);
+  const [preflightLoading, setPreflightLoading] = useState(true);
+  const [preflightFailed, setPreflightFailed] = useState(false);
+  // Chosen Entra ID per ambiguous assignment (keyed by type:sourceName). "" = skip.
+  const [ambiguousChoices, setAmbiguousChoices] = useState<Record<string, string>>({});
+
   useEffect(() => {
     fetch("/api/entra/apps")
       .then((r) => r.json())
       .then((data) => setEntraApps(data.apps ?? []))
       .catch(() => {})
       .finally(() => setCheckingDuplicate(false));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/entra/preflight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        groups: detail.groups.map((g) => ({ name: g.profile?.name })),
+        users: detail.users.map((u) => ({ userName: u.credentials?.userName })),
+        entityId: isSaml ? (samlSettings?.entityId ?? undefined) : undefined,
+      }),
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error("preflight failed");
+        return r.json();
+      })
+      .then((data: PreflightResult) => setPreflight(data))
+      .catch(() => {
+        setPreflight(null);
+        setPreflightFailed(true);
+      })
+      .finally(() => setPreflightLoading(false));
+    // Run once on open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -46,6 +85,31 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
     ? entraApps.find((a) => a.displayName.toLowerCase() === displayName.trim().toLowerCase())
     : undefined;
 
+  function buildConfirmedPrincipals(): ConfirmedPrincipal[] {
+    const all = [...(preflight?.groups ?? []), ...(preflight?.users ?? [])];
+    const confirmed: ConfirmedPrincipal[] = [];
+    for (const r of all) {
+      if (r.status === "matched" && r.entraId) {
+        confirmed.push({
+          entraId: r.entraId,
+          principalType: r.principalType,
+          label: r.sourceName,
+        });
+      } else if (r.status === "ambiguous") {
+        const chosen = ambiguousChoices[principalKey(r)];
+        if (chosen) {
+          confirmed.push({
+            entraId: chosen,
+            principalType: r.principalType,
+            label: r.sourceName,
+          });
+        }
+      }
+      // not_found and unselected ambiguous are skipped.
+    }
+    return confirmed;
+  }
+
   function handleConfirm() {
     const replyUrls = replyUrlsText
       .split("\n")
@@ -54,6 +118,7 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
     onConfirm({
       displayName,
       replyUrls,
+      confirmedPrincipals: buildConfirmedPrincipals(),
       ...(isSaml && { samlAcsUrl, samlEntityId }),
     });
   }
@@ -150,6 +215,14 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
                 <p className="mt-1 text-xs text-gray-400">
                   SP Entity ID / Audience — pre-filled from Okta
                 </p>
+                {preflight?.entityIdValidation &&
+                  !preflight.entityIdValidation.accepted && (
+                    <p className="mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                      <strong>Entity ID may be rejected by Entra:</strong>{" "}
+                      {preflight.entityIdValidation.reason ??
+                        "the identifier did not pass validation."}
+                    </p>
+                  )}
               </div>
 
               {/* Attribute statements info */}
@@ -178,6 +251,103 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
               after migration.
             </div>
           )}
+
+          {/* Assignments preview */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Assignments preview
+            </label>
+            {preflightLoading && (
+              <p className="text-xs text-gray-400">
+                Resolving assignments in Entra…
+              </p>
+            )}
+            {!preflightLoading && preflightFailed && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                Couldn&apos;t run the pre-flight resolution. You can still migrate, but
+                no group/user assignments will be created.
+              </p>
+            )}
+            {!preflightLoading && !preflightFailed && preflight && (
+              <div className="space-y-3">
+                {([
+                  { title: "Groups", items: preflight.groups },
+                  { title: "Users", items: preflight.users },
+                ] as const).map(({ title, items }) => {
+                  if (items.length === 0) return null;
+                  const matched = items.filter((r) => r.status === "matched");
+                  const ambiguous = items.filter((r) => r.status === "ambiguous");
+                  const notFound = items.filter((r) => r.status === "not_found");
+                  return (
+                    <div
+                      key={title}
+                      className="border border-gray-200 rounded-lg p-3 space-y-2"
+                    >
+                      <p className="text-xs font-semibold text-gray-600">{title}</p>
+
+                      {matched.length > 0 && (
+                        <div className="text-xs text-green-800 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+                          <span className="font-medium">
+                            ✅ {matched.length} matched
+                          </span>{" "}
+                          — {matched.map((r) => r.sourceName).join(", ")}
+                        </div>
+                      )}
+
+                      {ambiguous.map((r) => {
+                        const key = principalKey(r);
+                        return (
+                          <div
+                            key={key}
+                            className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 space-y-1"
+                          >
+                            <p>
+                              <span className="font-medium">⚠️ Ambiguous:</span>{" "}
+                              {r.sourceName}
+                            </p>
+                            <select
+                              value={ambiguousChoices[key] ?? ""}
+                              onChange={(e) =>
+                                setAmbiguousChoices((prev) => ({
+                                  ...prev,
+                                  [key]: e.target.value,
+                                }))
+                              }
+                              className="w-full px-2 py-1 border rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="">Skip</option>
+                              {(r.candidates ?? []).map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        );
+                      })}
+
+                      {notFound.length > 0 && (
+                        <div className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-md px-3 py-2">
+                          <span className="font-medium text-gray-600">
+                            ❌ {notFound.length} not found
+                          </span>{" "}
+                          — {notFound.map((r) => r.sourceName).join(", ")}
+                          <p className="text-gray-400 mt-0.5">
+                            not in Entra (sync gap) — will be skipped
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {preflight.groups.length === 0 && preflight.users.length === 0 && (
+                  <p className="text-xs text-gray-400">
+                    No groups or users assigned in Okta.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex justify-end gap-3 mt-6">

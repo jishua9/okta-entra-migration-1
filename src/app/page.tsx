@@ -114,7 +114,7 @@ export default function HomePage() {
     window.open(`/api/okta/apps/${selectedApp.id}/export`, "_blank");
   }
 
-  async function handleMigrate({ displayName, replyUrls, samlAcsUrl, samlEntityId }: MigrateConfirmPayload) {
+  async function handleMigrate({ displayName, replyUrls, samlAcsUrl, samlEntityId, confirmedPrincipals }: MigrateConfirmPayload) {
     if (!selectedApp || !detail) return;
     setShowMigrateModal(false);
     setMigrationResult(null);
@@ -129,8 +129,7 @@ export default function HomePage() {
           signOnMode: selectedApp.signOnMode,
           oktaAppId: selectedApp.id,
           notes: `Migrated from Okta app: ${selectedApp.label} (${selectedApp.id})`,
-          groups: detail.groups.map((g) => ({ id: g.id, name: g.profile?.name })),
-          users: detail.users.map((u) => ({ id: u.id, userName: u.credentials?.userName })),
+          confirmedPrincipals,
           ...(saml && {
             samlAcsUrl: samlAcsUrl ?? saml.acsUrl,
             samlEntityId: samlEntityId ?? saml.entityId,
