@@ -247,20 +247,25 @@ export async function createEntraApplication(
     created.appObjectId = appObjectId;
     created.spId = spId;
 
+    // Newly instantiated objects can lag in replication; tolerate 404s here.
     if (payload.signOnMode === "SAML_2_0") {
-      await withRetry(() =>
-        client.api(`/servicePrincipals/${spId}`).patch({
-          preferredSingleSignOnMode: "saml",
-        }),
+      await withRetry(
+        () =>
+          client.api(`/servicePrincipals/${spId}`).patch({
+            preferredSingleSignOnMode: "saml",
+          }),
+        { retryOn: [404], retries: 6 },
       );
     } else if (payload.replyUrls?.length) {
-      await withRetry(() =>
-        client.api(`/applications/${appObjectId}`).patch({
-          web: {
-            redirectUris: payload.replyUrls,
-            implicitGrantSettings: { enableIdTokenIssuance: false },
-          },
-        }),
+      await withRetry(
+        () =>
+          client.api(`/applications/${appObjectId}`).patch({
+            web: {
+              redirectUris: payload.replyUrls,
+              implicitGrantSettings: { enableIdTokenIssuance: false },
+            },
+          }),
+        { retryOn: [404], retries: 6 },
       );
     }
   } catch (e) {

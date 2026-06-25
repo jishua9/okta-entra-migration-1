@@ -25,4 +25,17 @@ describe("withRetry", () => {
     await expect(withRetry(fn, { retries: 2, baseMs: 0 })).rejects.toBeTruthy();
     expect(fn).toHaveBeenCalledTimes(3); // initial + 2 retries
   });
+  it("retries a 404 when listed in retryOn", async () => {
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce({ statusCode: 404 })
+      .mockResolvedValue("ok");
+    expect(await withRetry(fn, { retries: 3, baseMs: 0, retryOn: [404] })).toBe("ok");
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+  it("does not retry a 404 without retryOn", async () => {
+    const fn = vi.fn().mockRejectedValue({ statusCode: 404 });
+    await expect(withRetry(fn, { retries: 3, baseMs: 0 })).rejects.toMatchObject({ statusCode: 404 });
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
 });

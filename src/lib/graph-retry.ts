@@ -8,7 +8,7 @@ function statusOf(e: unknown): number | undefined {
   return undefined;
 }
 
-export interface RetryOpts { retries?: number; baseMs?: number }
+export interface RetryOpts { retries?: number; baseMs?: number; retryOn?: number[] }
 
 export async function withRetry<T>(
   fn: () => Promise<T>,
@@ -16,13 +16,14 @@ export async function withRetry<T>(
 ): Promise<T> {
   const retries = opts.retries ?? 4;
   const baseMs = opts.baseMs ?? 500;
+  const retryable = opts.retryOn?.length ? new Set([...RETRYABLE, ...opts.retryOn]) : RETRYABLE;
   let attempt = 0;
   for (;;) {
     try {
       return await fn();
     } catch (e) {
       const status = statusOf(e);
-      if (status === undefined || !RETRYABLE.has(status) || attempt >= retries) throw e;
+      if (status === undefined || !retryable.has(status) || attempt >= retries) throw e;
       const delay = baseMs * Math.pow(2, attempt);
       attempt++;
       if (delay > 0) await new Promise((r) => setTimeout(r, delay));
