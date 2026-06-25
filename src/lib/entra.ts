@@ -1,7 +1,11 @@
 import { ClientSecretCredential } from "@azure/identity";
 import { Client } from "@microsoft/microsoft-graph-client";
 import { TokenCredentialAuthenticationProvider } from "@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials";
-import { EntraAppPayload, MigrationGroupRef, MigrationUserRef, SamlAttributeStatement } from "@/types/entra";
+import { ConfirmedPrincipal, EntraAppPayload } from "@/types/entra";
+import { buildClaimsSchema } from "@/lib/saml-claims";
+import { keyToPem } from "@/lib/saml-cert";
+import { withRetry } from "@/lib/graph-retry";
+import { mapWithConcurrency } from "@/lib/concurrency";
 
 export interface EntraConfig {
   tenantId: string;
@@ -9,7 +13,10 @@ export interface EntraConfig {
   clientSecret: string;
 }
 
-function makeGraphClient(config: EntraConfig): Client {
+// Global-service "Custom" (non-gallery) application template for configuring SSO.
+const GENERIC_TEMPLATE_ID = "8adf8e6e-67b2-4cf2-a259-e3dc5476c621";
+
+export function makeGraphClient(config: EntraConfig): Client {
   const credential = new ClientSecretCredential(
     config.tenantId,
     config.clientId,
@@ -21,140 +28,187 @@ function makeGraphClient(config: EntraConfig): Client {
   return Client.initWithMiddleware({ authProvider });
 }
 
-function oDataEscape(value: string): string {
+export function oDataEscape(value: string): string {
   return value.replace(/'/g, "''");
 }
 
-// Maps common Okta EL user attribute expressions to Entra ID claim source/ID pairs.
-const OKTA_EXPR_TO_ENTRA: Record<string, { Source: string; ID: string }> = {
-  "user.email":         { Source: "user", ID: "mail" },
-  "user.login":         { Source: "user", ID: "userprincipalname" },
-  "user.firstName":     { Source: "user", ID: "givenname" },
-  "user.lastName":      { Source: "user", ID: "surname" },
-  "user.displayName":   { Source: "user", ID: "displayname" },
-  "user.department":    { Source: "user", ID: "department" },
-  "user.employeeNumber":{ Source: "user", ID: "employeeid" },
-  "user.mobilePhone":   { Source: "user", ID: "telephonenumber" },
-  "user.title":         { Source: "user", ID: "jobtitle" },
-  "user.streetAddress": { Source: "user", ID: "streetaddress" },
-  "user.city":          { Source: "user", ID: "city" },
-  "user.state":         { Source: "user", ID: "state" },
-  "user.countryCode":   { Source: "user", ID: "country" },
-  "user.postalCode":    { Source: "user", ID: "postalcode" },
-};
+// Tracks what has been created so rollback can clean up after a CORE failure.
+interface CreatedState {
+  appObjectId?: string;
+  spId?: string;
+  claimsPolicyId?: string;
+}
 
-function keyToPem(base64Key: string): string {
-  const lines = base64Key.match(/.{1,64}/g)?.join("\n") ?? base64Key;
-  return `-----BEGIN CERTIFICATE-----\n${lines}\n-----END CERTIFICATE-----`;
+export class MigrationCoreError extends Error {
+  cause: unknown;
+  rollback: { performed: boolean; errors: string[] };
+  constructor(cause: unknown, rollback: { performed: boolean; errors: string[] }) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "MigrationCoreError";
+    this.cause = cause;
+    this.rollback = rollback;
+  }
+}
+
+// Best-effort cleanup after a CORE failure: claims policy → SP → application.
+async function rollback(
+  client: Client,
+  created: CreatedState,
+): Promise<{ performed: boolean; errors: string[] }> {
+  const errors: string[] = [];
+  let performed = false;
+
+  if (created.claimsPolicyId) {
+    performed = true;
+    try {
+      await withRetry(() =>
+        client.api(`/policies/claimsMappingPolicies/${created.claimsPolicyId}`).delete(),
+      );
+    } catch (e) {
+      errors.push(
+        `Failed to delete claims mapping policy ${created.claimsPolicyId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  if (created.spId) {
+    performed = true;
+    try {
+      await withRetry(() => client.api(`/servicePrincipals/${created.spId}`).delete());
+    } catch (e) {
+      errors.push(
+        `Failed to delete service principal ${created.spId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  if (created.appObjectId) {
+    performed = true;
+    try {
+      await withRetry(() => client.api(`/applications/${created.appObjectId}`).delete());
+    } catch (e) {
+      errors.push(
+        `Failed to delete application ${created.appObjectId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  return { performed, errors };
 }
 
 interface SamlConfigResult {
   signingCertificate: string;
   certExpiry: string;
   claimsMapped: number;
-  claimsPolicyId?: string;
-  warnings: string[];
 }
 
+// CONFIGURATION steps for SAML. Each failure is captured as a warning and never
+// triggers rollback. `created.claimsPolicyId` is recorded for completeness.
 async function configureSaml(
   client: Client,
   appObjectId: string,
   spId: string,
-  payload: {
-    acsUrl: string;
-    entityId: string;
-    relayState: string;
-    attributeStatements: SamlAttributeStatement[];
-    displayName: string;
-  },
+  payload: EntraAppPayload,
+  created: CreatedState,
+  warnings: string[],
 ): Promise<SamlConfigResult> {
-  const warnings: string[] = [];
-
-  // Set SAML SSO mode and ACS URL on the service principal
-  await client.api(`/servicePrincipals/${spId}`).patch({
-    preferredSingleSignOnMode: "saml",
-    samlSingleSignOnSettings: { relayState: payload.relayState || null },
-    ...(payload.acsUrl ? { replyUrls: [payload.acsUrl] } : {}),
-  });
-
-  // Set entity ID (audience) on the app registration
-  if (payload.entityId) {
-    await client.api(`/applications/${appObjectId}`).patch({
-      identifierUris: [payload.entityId],
-    });
+  // Reply / ACS URL on the service principal.
+  if (payload.samlAcsUrl) {
+    try {
+      await withRetry(() =>
+        client.api(`/servicePrincipals/${spId}`).patch({ replyUrls: [payload.samlAcsUrl] }),
+      );
+    } catch (e) {
+      warnings.push(
+        `Could not set reply/ACS URL: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
 
-  // Build claims schema from Okta attribute statements
-  const claimsSchema = payload.attributeStatements.flatMap((stmt) => {
-    const value = stmt.values?.[0];
-    if (!value) return [];
-    const entra = OKTA_EXPR_TO_ENTRA[value];
-    if (!entra) {
-      warnings.push(`Could not map attribute "${stmt.name}" (expression: ${value}) — configure manually`);
-      return [];
+  // Entity ID (identifier URI) on the application. Entra often rejects this for
+  // unverified domains — that is a warning, not a rollback.
+  if (payload.samlEntityId) {
+    try {
+      await withRetry(() =>
+        client.api(`/applications/${appObjectId}`).patch({
+          identifierUris: [payload.samlEntityId],
+        }),
+      );
+    } catch (e) {
+      warnings.push(
+        `Could not set Entity ID "${payload.samlEntityId}": ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
-    return [{ ...entra, SamlClaimType: stmt.name }];
-  });
+  }
 
-  let claimsPolicyId: string | undefined;
-  if (claimsSchema.length > 0) {
+  // Claims mapping policy.
+  const { schema, warnings: claimWarnings } = buildClaimsSchema(
+    payload.samlAttributeStatements ?? [],
+  );
+  warnings.push(...claimWarnings);
+
+  let claimsMapped = 0;
+  if (schema.length > 0) {
     try {
       const policyDef = JSON.stringify({
         ClaimsMappingPolicy: {
           Version: 1,
           IncludeBasicClaimSet: "true",
-          ClaimsSchema: claimsSchema,
+          ClaimsSchema: schema,
         },
       });
-      const policy = await client.api("/policies/claimsMappingPolicies").post({
-        definition: [policyDef],
-        displayName: `${payload.displayName} — Claims Mapping`,
-        isOrganizationDefault: false,
-      });
-      claimsPolicyId = policy.id;
+      const policy = await withRetry(() =>
+        client.api("/policies/claimsMappingPolicies").post({
+          definition: [policyDef],
+          displayName: `${payload.displayName} — Claims Mapping`,
+          isOrganizationDefault: false,
+        }),
+      );
+      created.claimsPolicyId = policy.id;
 
-      await client
-        .api(`/servicePrincipals/${spId}/claimsMappingPolicies/$ref`)
-        .post({
-          "@odata.id": `https://graph.microsoft.com/v1.0/policies/claimsMappingPolicies/${claimsPolicyId}`,
-        });
+      await withRetry(() =>
+        client.api(`/servicePrincipals/${spId}/claimsMappingPolicies/$ref`).post({
+          "@odata.id": `https://graph.microsoft.com/v1.0/policies/claimsMappingPolicies/${policy.id}`,
+        }),
+      );
+      claimsMapped = schema.length;
     } catch (e) {
       warnings.push(
-        `Claims mapping policy could not be created (requires Policy.ReadWrite.ApplicationConfiguration permission): ${e instanceof Error ? e.message : String(e)}`,
+        `Claims mapping policy could not be created/assigned (requires Policy.ReadWrite.ApplicationConfiguration permission): ${e instanceof Error ? e.message : String(e)}`,
       );
     }
   }
 
-  // Read back the auto-generated SAML signing certificate
+  // SAML token signing certificate (THE FIX) + activation.
   let signingCertificate = "";
   let certExpiry = "";
   try {
-    const sp = await client
-      .api(`/servicePrincipals/${spId}`)
-      .select("keyCredentials")
-      .get();
-    const signingKey = (sp.keyCredentials as Array<{
-      usage: string;
-      type: string;
-      key?: string;
-      endDateTime?: string;
-    }>)?.find((k) => k.usage === "Sign" && k.type === "AsymmetricX509Cert");
+    const endDateTime = new Date();
+    endDateTime.setFullYear(endDateTime.getFullYear() + 3);
+    const endDateTimeIso = endDateTime.toISOString();
 
-    if (signingKey?.key) {
-      signingCertificate = keyToPem(signingKey.key);
-      certExpiry = signingKey.endDateTime ?? "";
-    }
-  } catch {
-    warnings.push("Could not read signing certificate — retrieve it manually from Entra ID");
+    const cert = await withRetry(() =>
+      client.api(`/servicePrincipals/${spId}/addTokenSigningCertificate`).post({
+        displayName: `CN=${payload.displayName}`,
+        endDateTime: endDateTimeIso,
+      }),
+    );
+
+    await withRetry(() =>
+      client.api(`/servicePrincipals/${spId}`).patch({
+        preferredTokenSigningKeyThumbprint: cert.thumbprint,
+      }),
+    );
+
+    if (cert.key) signingCertificate = keyToPem(cert.key);
+    certExpiry = endDateTimeIso;
+  } catch (e) {
+    warnings.push(
+      `Could not generate/activate SAML signing certificate: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
 
-  return {
-    signingCertificate,
-    certExpiry,
-    claimsMapped: claimsSchema.length,
-    claimsPolicyId,
-    warnings,
-  };
+  return { signingCertificate, certExpiry, claimsMapped };
 }
 
 export async function createEntraApplication(
@@ -165,6 +219,7 @@ export async function createEntraApplication(
   entraObjectId: string;
   entraSPId: string;
   displayName: string;
+  warnings: string[];
   samlConfigured?: boolean;
   samlSigningCertificate?: string;
   samlCertExpiry?: string;
@@ -172,58 +227,74 @@ export async function createEntraApplication(
   samlWarnings?: string[];
 }> {
   const client = makeGraphClient(config);
+  const warnings: string[] = [];
+  const created: CreatedState = {};
 
-  const app = await client.api("/applications").post({
-    displayName: payload.displayName,
-    signInAudience: "AzureADMyOrg",
-    web: payload.replyUrls?.length
-      ? {
-          redirectUris: payload.replyUrls,
-          implicitGrantSettings: { enableIdTokenIssuance: false },
-        }
-      : undefined,
-    requiredResourceAccess: [],
-    tags: ["okta-migrated"],
-    notes: payload.notes,
-  });
+  let appObjectId: string;
+  let spId: string;
+  let appId: string;
 
-  const sp = await client.api("/servicePrincipals").post({
-    appId: app.appId,
-    tags: ["HideApp", "okta-migrated"],
-  });
+  // ---- CORE steps: any failure rolls everything back and throws. ----
+  try {
+    const res = await withRetry(() =>
+      client.api(`/applicationTemplates/${GENERIC_TEMPLATE_ID}/instantiate`).post({
+        displayName: payload.displayName,
+      }),
+    );
+    appObjectId = res.application.id;
+    spId = res.servicePrincipal.id;
+    appId = res.application.appId;
+    created.appObjectId = appObjectId;
+    created.spId = spId;
 
+    if (payload.signOnMode === "SAML_2_0") {
+      await withRetry(() =>
+        client.api(`/servicePrincipals/${spId}`).patch({
+          preferredSingleSignOnMode: "saml",
+        }),
+      );
+    } else if (payload.replyUrls?.length) {
+      await withRetry(() =>
+        client.api(`/applications/${appObjectId}`).patch({
+          web: {
+            redirectUris: payload.replyUrls,
+            implicitGrantSettings: { enableIdTokenIssuance: false },
+          },
+        }),
+      );
+    }
+  } catch (e) {
+    const rollbackResult = await rollback(client, created);
+    throw new MigrationCoreError(e, rollbackResult);
+  }
+
+  // ---- CONFIGURATION steps (SAML only): failures warn, never rollback. ----
   let samlResult: SamlConfigResult | undefined;
   if (payload.signOnMode === "SAML_2_0") {
-    samlResult = await configureSaml(client, app.id, sp.id, {
-      acsUrl: payload.samlAcsUrl ?? "",
-      entityId: payload.samlEntityId ?? "",
-      relayState: payload.samlRelayState ?? "",
-      attributeStatements: payload.samlAttributeStatements ?? [],
-      displayName: payload.displayName,
-    });
+    samlResult = await configureSaml(client, appObjectId, spId, payload, created, warnings);
   }
 
   return {
-    entraAppId: app.appId,
-    entraObjectId: app.id,
-    entraSPId: sp.id,
-    displayName: app.displayName,
-    ...(samlResult && {
-      samlConfigured: true,
-      samlSigningCertificate: samlResult.signingCertificate,
-      samlCertExpiry: samlResult.certExpiry,
-      samlClaimsMapped: samlResult.claimsMapped,
-      samlWarnings: samlResult.warnings,
-    }),
+    entraAppId: appId,
+    entraObjectId: appObjectId,
+    entraSPId: spId,
+    displayName: payload.displayName,
+    warnings,
+    ...(samlResult
+      ? {
+          samlConfigured: true,
+          samlSigningCertificate: samlResult.signingCertificate,
+          samlCertExpiry: samlResult.certExpiry,
+          samlClaimsMapped: samlResult.claimsMapped,
+          samlWarnings: warnings,
+        }
+      : {}),
   };
 }
 
-type AssignResult = { ok: true } | { ok: false; message: string } | null;
-
 export async function assignAppMembers(
   servicePrincipalId: string,
-  groups: MigrationGroupRef[],
-  users: MigrationUserRef[],
+  principals: ConfirmedPrincipal[],
   config: EntraConfig,
 ): Promise<{ assignedGroups: number; assignedUsers: number; errors: string[] }> {
   const client = makeGraphClient(config);
@@ -231,62 +302,31 @@ export async function assignAppMembers(
   let assignedGroups = 0;
   let assignedUsers = 0;
 
-  const groupResults = await Promise.all(
-    groups.map(async (group): Promise<AssignResult> => {
-      if (!group.name) return null;
-      try {
-        const result = await client
-          .api("/groups")
-          .filter(`displayName eq '${oDataEscape(group.name)}'`)
-          .select("id,displayName")
-          .get();
-        const entraGroup = result.value[0];
-        if (!entraGroup) return { ok: false, message: `Group not found in Entra: ${group.name}` };
-        await client.api(`/servicePrincipals/${servicePrincipalId}/appRoleAssignedTo`).post({
-          principalId: entraGroup.id,
+  const results = await mapWithConcurrency(principals, 5, async (principal) => {
+    try {
+      await withRetry(() =>
+        client.api(`/servicePrincipals/${servicePrincipalId}/appRoleAssignedTo`).post({
+          principalId: principal.entraId,
           resourceId: servicePrincipalId,
           appRoleId: "00000000-0000-0000-0000-000000000000",
-        });
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, message: `Failed to assign group "${group.name}": ${e instanceof Error ? e.message : String(e)}` };
-      }
-    }),
-  );
+        }),
+      );
+      return { ok: true as const, principalType: principal.principalType };
+    } catch (e) {
+      return {
+        ok: false as const,
+        message: `Failed to assign ${principal.principalType} "${principal.label}": ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+  });
 
-  for (const r of groupResults) {
-    if (!r) continue;
-    if (r.ok) assignedGroups++;
-    else errors.push(r.message);
-  }
-
-  const userResults = await Promise.all(
-    users.map(async (user): Promise<AssignResult> => {
-      if (!user.userName) return null;
-      try {
-        const result = await client
-          .api("/users")
-          .filter(`userPrincipalName eq '${oDataEscape(user.userName)}'`)
-          .select("id,userPrincipalName")
-          .get();
-        const entraUser = result.value[0];
-        if (!entraUser) return { ok: false, message: `User not found in Entra: ${user.userName}` };
-        await client.api(`/servicePrincipals/${servicePrincipalId}/appRoleAssignedTo`).post({
-          principalId: entraUser.id,
-          resourceId: servicePrincipalId,
-          appRoleId: "00000000-0000-0000-0000-000000000000",
-        });
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, message: `Failed to assign user "${user.userName}": ${e instanceof Error ? e.message : String(e)}` };
-      }
-    }),
-  );
-
-  for (const r of userResults) {
-    if (!r) continue;
-    if (r.ok) assignedUsers++;
-    else errors.push(r.message);
+  for (const r of results) {
+    if (r.ok) {
+      if (r.principalType === "group") assignedGroups++;
+      else assignedUsers++;
+    } else {
+      errors.push(r.message);
+    }
   }
 
   return { assignedGroups, assignedUsers, errors };

@@ -27,11 +27,13 @@ export async function POST(req: Request) {
     let assignedUsers = 0;
     let assignmentErrors: string[] = [];
 
-    if (body.groups?.length || body.users?.length) {
+    // Task 14 will finish the assignment flow. For now pass through any
+    // already-resolved confirmed principals so this route keeps compiling.
+    const confirmedPrincipals = body.confirmedPrincipals ?? [];
+    if (confirmedPrincipals.length) {
       const assignment = await assignAppMembers(
         appResult.entraSPId,
-        body.groups ?? [],
-        body.users ?? [],
+        confirmedPrincipals,
         entraConfig,
       );
       assignedGroups = assignment.assignedGroups;
