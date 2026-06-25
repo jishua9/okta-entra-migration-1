@@ -24,6 +24,23 @@ db.exec(`
     azure_client_secret TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS migrations (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL,
+    okta_app_id     TEXT NOT NULL,
+    okta_label      TEXT NOT NULL,
+    sign_on_mode    TEXT,
+    status          TEXT NOT NULL,
+    entra_app_id    TEXT,
+    entra_object_id TEXT,
+    entra_sp_id     TEXT,
+    assigned_groups INTEGER NOT NULL DEFAULT 0,
+    assigned_users  INTEGER NOT NULL DEFAULT 0,
+    warnings        TEXT,
+    errors          TEXT,
+    created_at      TEXT NOT NULL
+  );
 `);
 
 export default db;
