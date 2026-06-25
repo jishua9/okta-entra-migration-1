@@ -21,8 +21,10 @@ export function useMigrationHistory() {
     }
   }, []);
 
+  // Defer the initial load into a microtask so the loading setState in refresh()
+  // does not run synchronously within the effect body.
   useEffect(() => {
-    refresh();
+    void Promise.resolve().then(refresh);
   }, [refresh]);
 
   return { history, refresh, loading };
