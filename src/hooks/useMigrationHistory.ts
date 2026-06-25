@@ -1,42 +1,29 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { MigrationHistoryEntry } from "@/types/entra";
-
-const STORAGE_KEY = "okta-entra-migration-history";
+import { useState, useEffect, useCallback } from "react";
+import { MigrationRow } from "@/types/entra";
 
 export function useMigrationHistory() {
-  const [history, setHistory] = useState<MigrationHistoryEntry[]>([]);
+  const [history, setHistory] = useState<MigrationRow[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    Promise.resolve()
-      .then(() => localStorage.getItem(STORAGE_KEY))
-      .then((raw) => {
-        if (raw) setHistory(JSON.parse(raw));
-      })
-      .catch(() => {});
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/migrations");
+      if (!res.ok) throw new Error(`Failed to load migrations: ${res.statusText}`);
+      const data: { migrations: MigrationRow[] } = await res.json();
+      setHistory(data.migrations ?? []);
+    } catch {
+      setHistory([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  function addEntry(entry: MigrationHistoryEntry) {
-    setHistory((prev) => {
-      const next = [entry, ...prev];
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // ignore quota errors
-      }
-      return next;
-    });
-  }
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
-  function clearHistory() {
-    setHistory([]);
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // ignore
-    }
-  }
-
-  return { history, addEntry, clearHistory };
+  return { history, refresh, loading };
 }

@@ -66,17 +66,23 @@ export interface PreflightResult {
 // What the migrate endpoint now receives: confirmed Entra principal IDs
 export interface ConfirmedPrincipal { entraId: string; principalType: "group" | "user"; label: string }
 
-export interface MigrationHistoryEntry {
+// Client-safe mirror of the server's MigrationRow (src/lib/migrations.ts).
+// Defined here so client code can import the type without pulling in
+// better-sqlite3 via @/lib/migrations.
+export interface MigrationRow {
   id: string;
   oktaAppId: string;
   oktaLabel: string;
-  entraAppId: string;
-  entraObjectId: string;
-  displayName: string;
-  migratedAt: string;
+  signOnMode?: string;
+  status: "success" | "failed" | "partial";
+  entraAppId?: string;
+  entraObjectId?: string;
+  entraSpId?: string;
   assignedGroups: number;
   assignedUsers: number;
-  assignmentErrors: string[];
+  warnings: string[];
+  errors: string[];
+  migratedAt: string;
 }
 
 export interface MigrateConfirmPayload {

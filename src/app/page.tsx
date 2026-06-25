@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { signOut } from "next-auth/react";
 import Link from "next/link";
 import { OktaApp, OktaAppDetail } from "@/types/okta";
-import { MigrationResult, MigrationHistoryEntry, MigrateConfirmPayload } from "@/types/entra";
+import { MigrationResult, MigrateConfirmPayload } from "@/types/entra";
 import { getSamlSettings } from "@/lib/okta-utils";
 import AppDetailPanel from "@/components/AppDetailPanel";
 import MigrateModal from "@/components/MigrateModal";
@@ -38,8 +38,11 @@ export default function HomePage() {
   const [showMigrateModal, setShowMigrateModal] = useState(false);
   const [migrationResult, setMigrationResult] = useState<MigrationResult | null>(null);
 
-  const { history, addEntry, clearHistory } = useMigrationHistory();
-  const migratedIds = useMemo(() => new Set(history.map((e) => e.oktaAppId)), [history]);
+  const { history, refresh } = useMigrationHistory();
+  const migratedIds = useMemo(
+    () => new Set(history.filter((e) => e.status !== "failed").map((e) => e.oktaAppId)),
+    [history],
+  );
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -139,21 +142,9 @@ export default function HomePage() {
       const result: MigrationResult = await res.json();
       setMigrationResult(result);
 
-      if (result.success && result.entraAppId && result.entraObjectId) {
-        const entry: MigrationHistoryEntry = {
-          id: crypto.randomUUID(),
-          oktaAppId: selectedApp.id,
-          oktaLabel: selectedApp.label,
-          entraAppId: result.entraAppId,
-          entraObjectId: result.entraObjectId,
-          displayName: result.displayName ?? displayName,
-          migratedAt: new Date().toISOString(),
-          assignedGroups: result.assignedGroups ?? 0,
-          assignedUsers: result.assignedUsers ?? 0,
-          assignmentErrors: result.assignmentErrors ?? [],
-        };
-        addEntry(entry);
-      }
+      // The server already recorded this attempt (success, partial, or failed)
+      // via recordMigration in the migrate route — just refetch the audit table.
+      await refresh();
     } catch (e) {
       setMigrationResult({
         success: false,
@@ -303,7 +294,7 @@ export default function HomePage() {
         {/* Detail / History Panel */}
         <main className="flex-1 overflow-y-auto p-6">
           {!selectedApp && (
-            <MigrationHistoryPanel history={history} onClear={clearHistory} />
+            <MigrationHistoryPanel history={history} />
           )}
 
           {selectedApp && (
