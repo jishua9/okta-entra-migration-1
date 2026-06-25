@@ -1,11 +1,18 @@
 import { ClientSecretCredential } from "@azure/identity";
 import { Client } from "@microsoft/microsoft-graph-client";
 import { TokenCredentialAuthenticationProvider } from "@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials";
-import { ConfirmedPrincipal, EntraAppPayload } from "@/types/entra";
+import {
+  ConfirmedPrincipal,
+  EntraAppPayload,
+  PreflightResult,
+  ResolvedAssignment,
+} from "@/types/entra";
 import { buildClaimsSchema } from "@/lib/saml-claims";
 import { keyToPem } from "@/lib/saml-cert";
 import { withRetry } from "@/lib/graph-retry";
 import { mapWithConcurrency } from "@/lib/concurrency";
+import { classifyMatch } from "@/lib/assignment-match";
+import { validateIdentifierUri } from "@/lib/entra-identifiers";
 
 export interface EntraConfig {
   tenantId: string;
@@ -357,4 +364,65 @@ export async function listEntraApplications(
   }
 
   return apps;
+}
+
+export async function getVerifiedDomains(config: EntraConfig): Promise<string[]> {
+  const client = makeGraphClient(config);
+  const res = await client.api("/domains").select("id,isVerified").get();
+  return (res.value as { id: string; isVerified: boolean }[])
+    .filter((d) => d.isVerified)
+    .map((d) => d.id);
+}
+
+export async function resolveAssignments(
+  groups: { name?: string }[],
+  users: { userName?: string }[],
+  entityId: string | undefined,
+  config: EntraConfig,
+): Promise<PreflightResult> {
+  const client = makeGraphClient(config);
+
+  const resolveOne = async (
+    name: string,
+    kind: "group" | "user",
+  ): Promise<ResolvedAssignment> => {
+    const path = kind === "group" ? "/groups" : "/users";
+    const field = kind === "group" ? "displayName" : "userPrincipalName";
+    const res = await withRetry(() =>
+      client
+        .api(path)
+        .filter(`${field} eq '${oDataEscape(name)}'`)
+        .select(`id,${field}`)
+        .get(),
+    );
+    const m = classifyMatch(name, res.value ?? []);
+    return {
+      sourceName: name,
+      status: m.status,
+      entraId: m.entraId,
+      principalType: kind,
+      candidates: m.candidates?.map((c) => ({
+        id: c.id,
+        label: c.displayName ?? c.userPrincipalName ?? c.id,
+      })),
+    };
+  };
+
+  const groupResults = await mapWithConcurrency(
+    groups.filter((g) => g.name),
+    5,
+    (g) => resolveOne(g.name!, "group"),
+  );
+  const userResults = await mapWithConcurrency(
+    users.filter((u) => u.userName),
+    5,
+    (u) => resolveOne(u.userName!, "user"),
+  );
+
+  let entityIdValidation;
+  if (entityId) {
+    const domains = await getVerifiedDomains(config);
+    entityIdValidation = validateIdentifierUri(entityId, domains);
+  }
+  return { groups: groupResults, users: userResults, entityIdValidation };
 }
