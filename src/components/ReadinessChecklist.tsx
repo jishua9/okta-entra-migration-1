@@ -72,15 +72,15 @@ export default function ReadinessChecklist({ detail }: { detail: OktaAppDetail }
   const warnCount = items.filter((i) => i.status === "warn").length;
 
   return (
-    <section className="bg-white rounded-xl border p-5">
+    <section className="bg-panel rounded-xl border border-line p-5">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-gray-700">Migration Readiness</h3>
+        <h3 className="font-semibold text-foreground">Migration Readiness</h3>
         {warnCount > 0 ? (
-          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300">
             {warnCount} manual step{warnCount > 1 ? "s" : ""} required
           </span>
         ) : (
-          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-500/15 text-green-300">
             Ready to migrate
           </span>
         )}
@@ -90,14 +90,14 @@ export default function ReadinessChecklist({ detail }: { detail: OktaAppDetail }
           <li key={item.label} className="flex gap-3 text-sm">
             <span
               className={`mt-0.5 shrink-0 font-bold ${
-                item.status === "ok" ? "text-green-500" : "text-amber-500"
+                item.status === "ok" ? "text-green-400" : "text-amber-400"
               }`}
             >
               {item.status === "ok" ? "✓" : "⚠"}
             </span>
             <div>
-              <span className="font-medium text-gray-700">{item.label}</span>
-              <span className="text-gray-500"> — {item.detail}</span>
+              <span className="font-medium text-foreground">{item.label}</span>
+              <span className="text-muted"> — {item.detail}</span>
             </div>
           </li>
         ))}

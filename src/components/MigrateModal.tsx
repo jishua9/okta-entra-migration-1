@@ -127,37 +127,37 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
 
   return (
     <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
       onClick={onCancel}
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto"
+        className="bg-panel border border-line rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg font-semibold text-gray-900 mb-1">
+        <h2 className="text-lg font-semibold text-foreground mb-1">
           Migrate to Entra ID
         </h2>
-        <p className="text-sm text-gray-500 mb-5">
+        <p className="text-sm text-muted mb-5">
           Review and confirm the details before creating the app registration.
         </p>
 
         <div className="space-y-4">
           {/* Display name */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-muted mb-1">
               Display Name
             </label>
             <input
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-line rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             />
             {checkingDuplicate && (
-              <p className="mt-1 text-xs text-gray-400">Checking Entra ID for duplicates…</p>
+              <p className="mt-1 text-xs text-faint">Checking Entra ID for duplicates…</p>
             )}
             {!checkingDuplicate && duplicate && (
-              <p className="mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              <p className="mt-1.5 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
                 <strong>Possible duplicate:</strong> An app named &ldquo;{duplicate.displayName}&rdquo; already
                 exists in Entra ID (App ID: <span className="font-mono">{duplicate.appId}</span>).
                 You can still proceed, but check that you&apos;re not duplicating a prior migration.
@@ -168,16 +168,16 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
           {/* OIDC redirect URIs — only shown for non-SAML apps */}
           {!isSaml && (
             <div>
-              <label htmlFor="redirect-uris" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="redirect-uris" className="block text-sm font-medium text-muted mb-1">
                 Redirect URIs{" "}
-                <span className="font-normal text-gray-400">(one per line)</span>
+                <span className="font-normal text-faint">(one per line)</span>
               </label>
               <textarea
                 id="redirect-uris"
                 rows={4}
                 value={replyUrlsText}
                 onChange={(e) => setReplyUrlsText(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-line rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
                 placeholder="https://..."
               />
             </div>
@@ -187,37 +187,37 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
           {isSaml && (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-muted mb-1">
                   ACS URL
                 </label>
                 <input
                   type="text"
                   value={samlAcsUrl}
                   onChange={(e) => setSamlAcsUrl(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-line rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
                   placeholder="https://app.example.com/saml/acs"
                 />
-                <p className="mt-1 text-xs text-gray-400">
+                <p className="mt-1 text-xs text-faint">
                   Assertion Consumer Service URL — pre-filled from Okta
                 </p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-muted mb-1">
                   Entity ID
                 </label>
                 <input
                   type="text"
                   value={samlEntityId}
                   onChange={(e) => setSamlEntityId(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-line rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
                   placeholder="https://app.example.com"
                 />
-                <p className="mt-1 text-xs text-gray-400">
+                <p className="mt-1 text-xs text-faint">
                   SP Entity ID / Audience — pre-filled from Okta
                 </p>
                 {preflight?.entityIdValidation &&
                   !preflight.entityIdValidation.accepted && (
-                    <p className="mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                    <p className="mt-1.5 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
                       <strong>Entity ID may be rejected by Entra:</strong>{" "}
                       {preflight.entityIdValidation.reason ??
                         "the identifier did not pass validation."}
@@ -227,8 +227,8 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
 
               {/* Attribute statements info */}
               {(samlSettings?.attributeStatements.length ?? 0) > 0 && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
-                  <strong>Attribute statements:</strong>{" "}
+                <div className="bg-primary/10 border border-primary/30 rounded-lg p-3 text-xs text-muted">
+                  <strong className="text-foreground">Attribute statements:</strong>{" "}
                   {samlSettings!.attributeStatements.length} found in Okta.{" "}
                   {mappableCount > 0
                     ? `${mappableCount} will be mapped automatically to an Entra claims policy.`
@@ -236,8 +236,8 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
                 </div>
               )}
 
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
-                <strong>SAML auto-configuration:</strong> The ACS URL, Entity ID, and sign-on mode
+              <div className="bg-primary/10 border border-primary/30 rounded-lg p-3 text-xs text-muted">
+                <strong className="text-foreground">SAML auto-configuration:</strong> The ACS URL, Entity ID, and sign-on mode
                 will be set automatically. A signing certificate will be generated — its value will
                 be shown in the result so you can configure it in your service provider.
               </div>
@@ -245,7 +245,7 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
           )}
 
           {!isSaml && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-xs text-amber-200">
               <strong>Note:</strong> This will create a new App Registration in your Entra ID tenant.
               SSO configuration, SAML certificates, and claim mappings must be completed manually
               after migration.
@@ -254,16 +254,16 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
 
           {/* Assignments preview */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-muted mb-1">
               Assignments preview
             </label>
             {preflightLoading && (
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-faint">
                 Resolving assignments in Entra…
               </p>
             )}
             {!preflightLoading && preflightFailed && (
-              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
                 Couldn&apos;t run the pre-flight resolution. You can still migrate, but
                 no group/user assignments will be created.
               </p>
@@ -281,12 +281,12 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
                   return (
                     <div
                       key={title}
-                      className="border border-gray-200 rounded-lg p-3 space-y-2"
+                      className="border border-line rounded-lg p-3 space-y-2"
                     >
-                      <p className="text-xs font-semibold text-gray-600">{title}</p>
+                      <p className="text-xs font-semibold text-muted">{title}</p>
 
                       {matched.length > 0 && (
-                        <div className="text-xs text-green-800 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+                        <div className="text-xs text-green-300 bg-green-500/10 border border-green-500/30 rounded-md px-3 py-2">
                           <span className="font-medium">
                             ✅ {matched.length} matched
                           </span>{" "}
@@ -299,7 +299,7 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
                         return (
                           <div
                             key={key}
-                            className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 space-y-1"
+                            className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2 space-y-1"
                           >
                             <p>
                               <span className="font-medium">⚠️ Ambiguous:</span>{" "}
@@ -313,7 +313,7 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
                                   [key]: e.target.value,
                                 }))
                               }
-                              className="w-full px-2 py-1 border rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              className="w-full px-2 py-1 border border-line rounded-md text-xs focus:outline-none focus:ring-2 focus:ring-primary"
                             >
                               <option value="">Skip</option>
                               {(r.candidates ?? []).map((c) => (
@@ -327,12 +327,12 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
                       })}
 
                       {notFound.length > 0 && (
-                        <div className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-md px-3 py-2">
-                          <span className="font-medium text-gray-600">
+                        <div className="text-xs text-muted bg-white/5 border border-line rounded-md px-3 py-2">
+                          <span className="font-medium text-muted">
                             ❌ {notFound.length} not found
                           </span>{" "}
                           — {notFound.map((r) => r.sourceName).join(", ")}
-                          <p className="text-gray-400 mt-0.5">
+                          <p className="text-faint mt-0.5">
                             not in Entra (sync gap) — will be skipped
                           </p>
                         </div>
@@ -341,7 +341,7 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
                   );
                 })}
                 {preflight.groups.length === 0 && preflight.users.length === 0 && (
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-faint">
                     No groups or users assigned in Okta.
                   </p>
                 )}
@@ -354,7 +354,7 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 transition"
+            className="px-4 py-2 text-sm border border-line text-foreground rounded-lg hover:bg-panel-hover transition"
           >
             Cancel
           </button>
@@ -362,7 +362,7 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
             type="button"
             onClick={handleConfirm}
             disabled={!displayName.trim()}
-            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition"
+            className="px-4 py-2 text-sm bg-primary text-primary-fg rounded-lg hover:bg-primary-hover disabled:opacity-50 transition"
           >
             Create in Entra ID
           </button>

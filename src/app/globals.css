@@ -1,26 +1,73 @@
 @import "tailwindcss";
 
+/*
+  Dark theme — Claude-inspired warm palette.
+  The app is intentionally dark regardless of the OS `prefers-color-scheme`,
+  so surfaces and text always agree (no white cards behind light text).
+*/
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #1f1e1d; /* app surface (warm charcoal) */
+  --foreground: #ece9e1; /* primary cream text */
+
+  --surface: #1f1e1d; /* page background */
+  --panel: #2a2927; /* cards / headers / sidebars */
+  --panel-hover: #34322f; /* hovered list rows, subtle fills */
+  --line: #3d3b37; /* borders / dividers */
+
+  --muted: #b4ada1; /* secondary text */
+  --faint: #837d73; /* tertiary / hint text */
+
+  --input-solid: #171615; /* form-control fill (darker than panels) */
+
+  --primary: #d97757; /* Claude terracotta-orange accent */
+  --primary-hover: #c15f3c;
+  --primary-fg: #1f1206; /* text on the accent */
 }
 
 @theme inline {
-  --color-background: var(--background);
+  --color-background: var(--surface);
   --color-foreground: var(--foreground);
+
+  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+  --color-panel-hover: var(--panel-hover);
+  --color-line: var(--line);
+
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fg: var(--primary-fg);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  background: var(--background);
+  background: var(--surface);
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+/*
+  Guarantee legible form controls everywhere: an explicit dark fill and cream
+  text, so nothing depends on inherited colors. Overridable by utility classes.
+*/
+input,
+textarea,
+select {
+  background-color: var(--input-solid);
+  color: var(--foreground);
+  border-color: var(--line);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--faint);
+}
+
+/* Warm-toned scrollbars to match the surfaces. */
+* {
+  scrollbar-color: var(--line) transparent;
 }
