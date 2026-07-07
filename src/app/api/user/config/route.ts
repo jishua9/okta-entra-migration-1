@@ -27,6 +27,12 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "All fields are required" }, { status: 400 });
   }
 
-  setUserConfig(auth.userId, { oktaOrgUrl, oktaApiToken, azureTenantId, azureClientId, azureClientSecret });
+  setUserConfig(auth.userId, {
+    oktaOrgUrl: oktaOrgUrl.trim().replace(/\/$/, ""),
+    oktaApiToken: oktaApiToken.trim(),
+    azureTenantId: azureTenantId.trim(),
+    azureClientId: azureClientId.trim(),
+    azureClientSecret: azureClientSecret.trim(),
+  });
   return NextResponse.json({ ok: true });
 }

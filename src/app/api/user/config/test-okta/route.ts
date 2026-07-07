@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   try {
     const res = await fetch(`${orgUrl.trim().replace(/\/$/, "")}/api/v1/org`, {
       headers: {
-        Authorization: `SSWS ${apiToken}`,
+        Authorization: `SSWS ${apiToken.trim()}`,
         Accept: "application/json",
       },
     });
