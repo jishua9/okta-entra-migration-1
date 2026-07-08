@@ -286,6 +286,93 @@ async function configureSaml(
   return { signingCertificate, certExpiry, claimsMapped };
 }
 
+// Reads the created objects back from Graph and confirms the things we set
+// actually landed (redirect/ACS URIs, Entity ID, SSO mode, signing cert).
+// A real discrepancy is pushed to `warnings` (degrading the migration to
+// "partial"); an inability to read back is a soft "Verified" warning only.
+async function verifyCreatedApp(
+  client: Client,
+  appObjectId: string,
+  spId: string,
+  payload: EntraAppPayload,
+  warnings: string[],
+  steps: MigrationStep[],
+): Promise<void> {
+  const wasDone = (label: string) =>
+    steps.some((s) => s.label === label && s.status === "done");
+  const needsSp = payload.signOnMode === "SAML_2_0";
+
+  // Compare the read-back objects against what we set. Returns any mismatches.
+  const check = (
+    app: { web?: { redirectUris?: string[] }; identifierUris?: string[] },
+    sp: { preferredSingleSignOnMode?: string; keyCredentials?: Array<{ usage?: string }> } | undefined,
+  ): string[] => {
+    const redirectUris = app.web?.redirectUris ?? [];
+    const identifierUris = app.identifierUris ?? [];
+    const m: string[] = [];
+    if (wasDone("Redirect URIs")) {
+      for (const u of payload.replyUrls ?? []) {
+        if (!redirectUris.includes(u)) m.push(`redirect URI missing: ${u}`);
+      }
+    }
+    if (wasDone("ACS / reply URL") && payload.samlAcsUrl && !redirectUris.includes(payload.samlAcsUrl)) {
+      m.push("ACS URL not present on the application");
+    }
+    if (wasDone("Entity ID") && payload.samlEntityId && !identifierUris.includes(payload.samlEntityId)) {
+      m.push("Entity ID not present on the application");
+    }
+    if (needsSp && sp) {
+      if (wasDone("SAML sign-on mode") && sp.preferredSingleSignOnMode !== "saml") {
+        m.push("SAML sign-on mode not applied");
+      }
+      if (wasDone("Signing certificate") && !(sp.keyCredentials ?? []).some((k) => k.usage === "Sign")) {
+        m.push("signing certificate not present on the service principal");
+      }
+    }
+    return m;
+  };
+
+  // Read-back can hit a replica that hasn't caught up yet (a just-set property
+  // reads back empty). Poll a few times before trusting a mismatch, so we don't
+  // flag a good migration as partial on eventual-consistency lag.
+  try {
+    let mismatches: string[] = [];
+    const attempts = 5;
+    for (let i = 0; i < attempts; i++) {
+      const app = await withRetry(
+        () => client.api(`/applications/${appObjectId}`).select("web,identifierUris").get(),
+        { retryOn: [404], retries: 4 },
+      );
+      const sp = needsSp
+        ? await withRetry(
+            () =>
+              client
+                .api(`/servicePrincipals/${spId}`)
+                .select("preferredSingleSignOnMode,keyCredentials")
+                .get(),
+            { retryOn: [404], retries: 4 },
+          )
+        : undefined;
+      mismatches = check(app, sp);
+      if (mismatches.length === 0) break;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 600 * Math.pow(2, i)));
+    }
+
+    if (mismatches.length) warnings.push(...mismatches.map((m) => `Verification: ${m}`));
+    steps.push({
+      label: "Verified",
+      status: mismatches.length ? "warning" : "done",
+      detail: mismatches.length ? mismatches.join("; ") : "read-back confirmed in Entra ID",
+    });
+  } catch (e) {
+    steps.push({
+      label: "Verified",
+      status: "warning",
+      detail: `could not read back the created app: ${e instanceof Error ? e.message : String(e)}`,
+    });
+  }
+}
+
 export async function createEntraApplication(
   payload: EntraAppPayload,
   config: EntraConfig,
@@ -363,6 +450,9 @@ export async function createEntraApplication(
   if (payload.signOnMode === "SAML_2_0") {
     samlResult = await configureSaml(client, appObjectId, spId, payload, created, warnings, steps);
   }
+
+  // Read the created objects back and confirm what we set actually landed.
+  await verifyCreatedApp(client, appObjectId, spId, payload, warnings, steps);
 
   return {
     entraAppId: appId,
