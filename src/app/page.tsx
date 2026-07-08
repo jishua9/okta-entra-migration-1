@@ -8,6 +8,7 @@ import { MigrationResult, MigrateConfirmPayload } from "@/types/entra";
 import { getSamlSettings } from "@/lib/okta-utils";
 import AppDetailPanel from "@/components/AppDetailPanel";
 import MigrateModal from "@/components/MigrateModal";
+import BulkMigrateModal from "@/components/BulkMigrateModal";
 import MigrationHistoryPanel from "@/components/MigrationHistoryPanel";
 import { useMigrationHistory } from "@/hooks/useMigrationHistory";
 
@@ -38,6 +39,17 @@ export default function HomePage() {
   const [showMigrateModal, setShowMigrateModal] = useState(false);
   const [migrating, setMigrating] = useState(false);
   const [migrationResult, setMigrationResult] = useState<MigrationResult | null>(null);
+
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const toggleSelect = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const { history, refresh } = useMigrationHistory();
   const migratedIds = useMemo(
@@ -245,6 +257,27 @@ export default function HomePage() {
                 {filtered.length} of {apps.length}
               </p>
             </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => { setSelectMode((m) => !m); setSelectedIds(new Set()); }}
+                className={`text-xs px-2 py-1 rounded-md font-medium transition ${
+                  selectMode ? "bg-primary/15 text-primary" : "bg-white/5 text-muted hover:bg-panel-hover"
+                }`}
+              >
+                {selectMode ? "✕ Cancel select" : "☑ Select for bulk migrate"}
+              </button>
+              {selectMode && (
+                <button
+                  type="button"
+                  onClick={() => setShowBulkModal(true)}
+                  disabled={selectedIds.size === 0}
+                  className="text-xs px-3 py-1 rounded-md font-medium bg-primary text-primary-fg hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed transition"
+                >
+                  → Migrate ({selectedIds.size})
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto">
@@ -275,17 +308,30 @@ export default function HomePage() {
               <button
                 key={app.id}
                 type="button"
-                onClick={() => selectApp(app)}
+                onClick={() => (selectMode ? toggleSelect(app.id) : selectApp(app))}
                 className={`w-full text-left px-4 py-3 border-b border-line hover:bg-panel-hover transition ${
-                  selectedApp?.id === app.id
+                  (selectMode ? selectedIds.has(app.id) : selectedApp?.id === app.id)
                     ? "bg-primary/10 border-l-4 border-l-primary"
                     : ""
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-sm text-foreground truncate">
-                    {app.label}
-                  </span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    {selectMode && (
+                      <span
+                        className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center text-[10px] ${
+                          selectedIds.has(app.id)
+                            ? "bg-primary border-primary text-primary-fg"
+                            : "border-line text-transparent"
+                        }`}
+                      >
+                        ✓
+                      </span>
+                    )}
+                    <span className="font-medium text-sm text-foreground truncate">
+                      {app.label}
+                    </span>
+                  </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {migratedIds.has(app.id) && (
                       <span className="text-xs font-medium px-1.5 py-0.5 rounded-full bg-primary/20 text-primary">
@@ -407,6 +453,19 @@ export default function HomePage() {
           result={migrationResult}
           onConfirm={handleMigrate}
           onCancel={() => setShowMigrateModal(false)}
+        />
+      )}
+
+      {/* Bulk Migrate Modal */}
+      {showBulkModal && (
+        <BulkMigrateModal
+          apps={apps.filter((a) => selectedIds.has(a.id))}
+          onClose={() => {
+            setShowBulkModal(false);
+            setSelectMode(false);
+            setSelectedIds(new Set());
+          }}
+          onFinished={refresh}
         />
       )}
     </div>
