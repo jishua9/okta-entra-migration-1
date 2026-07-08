@@ -2,12 +2,25 @@ import { OktaApp } from "@/types/okta";
 import { SamlAttributeStatement } from "@/types/entra";
 
 export function getRedirectUris(app: OktaApp): string[] {
-  return (
-    (app.settings as { app?: { redirectUris?: string[] } })?.app?.redirectUris ??
-    (app.credentials as { oauthClient?: { redirectUris?: string[] } })?.oauthClient
-      ?.redirectUris ??
-    []
-  );
+  const settings = app.settings as {
+    app?: { redirectUris?: string[]; redirectURI?: string };
+    oauthClient?: { redirect_uris?: string[] };
+  } | undefined;
+  const credentials = app.credentials as {
+    oauthClient?: { redirectUris?: string[] };
+  } | undefined;
+
+  // Prefer any array-shaped source: standard OIDC apps expose
+  // settings.oauthClient.redirect_uris (snake_case).
+  const fromArray =
+    settings?.oauthClient?.redirect_uris ??
+    settings?.app?.redirectUris ??
+    credentials?.oauthClient?.redirectUris;
+  if (fromArray?.length) return fromArray;
+
+  // Some Okta app templates (e.g. Okta Workflows) expose a single redirectURI.
+  const single = settings?.app?.redirectURI;
+  return single ? [single] : [];
 }
 
 interface SamlSettings {

@@ -12,6 +12,8 @@ function analyze(detail: OktaAppDetail): CheckItem[] {
   const items: CheckItem[] = [];
 
   switch (app.signOnMode) {
+    // Okta reports OIDC apps as "OPENID_CONNECT"; keep "OIDC_CLIENT" as a fallback alias.
+    case "OPENID_CONNECT":
     case "OIDC_CLIENT":
       items.push({ label: "Sign-on mode", detail: "OAuth/OIDC — redirect URIs migrated automatically", status: "ok" });
       break;
@@ -20,6 +22,9 @@ function analyze(detail: OktaAppDetail): CheckItem[] {
       break;
     case "AUTO_LOGIN":
       items.push({ label: "Sign-on mode", detail: "SWA (form-fill) — no direct Entra equivalent; consider a linked app", status: "warn" });
+      break;
+    case "BROWSER_PLUGIN":
+      items.push({ label: "Sign-on mode", detail: "SWA browser-plugin (form-fill) — no direct Entra equivalent; a placeholder app is created, SSO must be set up manually", status: "warn" });
       break;
     case "BOOKMARK":
       items.push({ label: "Sign-on mode", detail: "Bookmark — consider using My Apps in Entra instead", status: "warn" });
