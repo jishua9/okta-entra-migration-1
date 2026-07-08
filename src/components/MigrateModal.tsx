@@ -146,6 +146,7 @@ interface Props {
 
 export default function MigrateModal({ app, detail, migrating, result, onConfirm, onCancel }: Props) {
   const isSaml = app.signOnMode === "SAML_2_0";
+  const isOidc = app.signOnMode === "OPENID_CONNECT" || app.signOnMode === "OIDC_CLIENT";
   const samlSettings = getSamlSettings(app);
 
   const [displayName, setDisplayName] = useState(app.label);
@@ -293,8 +294,8 @@ export default function MigrateModal({ app, detail, migrating, result, onConfirm
             )}
           </div>
 
-          {/* OIDC redirect URIs — only shown for non-SAML apps */}
-          {!isSaml && (
+          {/* Redirect URIs only apply to OIDC apps. */}
+          {isOidc && (
             <div>
               <label htmlFor="redirect-uris" className="block text-sm font-medium text-muted mb-1">
                 Redirect URIs{" "}
@@ -372,11 +373,11 @@ export default function MigrateModal({ app, detail, migrating, result, onConfirm
             </>
           )}
 
-          {!isSaml && (
+          {!isSaml && !isOidc && (
             <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-xs text-amber-200">
-              <strong>Note:</strong> This will create a new App Registration in your Entra ID tenant.
-              SSO configuration, SAML certificates, and claim mappings must be completed manually
-              after migration.
+              <strong>Note:</strong> This app type ({app.signOnMode}) has no SSO protocol to
+              migrate. A placeholder App Registration and Service Principal will be created;
+              set up Password-based SSO (login URL and credentials) manually in Entra ID.
             </div>
           )}
 

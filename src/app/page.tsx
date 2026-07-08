@@ -178,6 +178,20 @@ export default function HomePage() {
         <div className="flex gap-2">
           <button
             type="button"
+            onClick={() => {
+              detailAbortRef.current?.abort();
+              setSelectedApp(null);
+              setDetail(null);
+              setMigrationResult(null);
+            }}
+            disabled={!selectedApp}
+            className="text-sm px-4 py-2 rounded-lg border border-line text-foreground hover:bg-panel-hover disabled:opacity-40 disabled:cursor-default transition"
+            title="Back to migration history"
+          >
+            ⌂ Home
+          </button>
+          <button
+            type="button"
             onClick={refreshApps}
             className="text-sm px-4 py-2 rounded-lg border border-line text-foreground hover:bg-panel-hover transition"
           >
