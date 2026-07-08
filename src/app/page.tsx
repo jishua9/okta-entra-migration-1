@@ -341,70 +341,52 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* Migration Result Banner */}
-              {migrationResult && (
-                <div
-                  className={`mb-4 p-4 rounded-lg text-sm ${
-                    migrationResult.success
-                      ? "bg-green-500/10 text-green-200 border border-green-500/30"
-                      : "bg-red-500/10 text-red-200 border border-red-500/30"
-                  }`}
-                >
-                  {migrationResult.success ? (
-                    <div className="space-y-2">
-                      <p><strong>Migration successful!</strong> App created in Entra ID.</p>
-                      <p>
-                        Application (client) ID:{" "}
-                        <code className="font-mono">{migrationResult.entraAppId}</code>
-                      </p>
-                      <p>
-                        Object ID:{" "}
-                        <code className="font-mono">{migrationResult.entraObjectId}</code>
-                      </p>
-                      <p>
-                        Assigned: {migrationResult.assignedGroups ?? 0} group(s),{" "}
-                        {migrationResult.assignedUsers ?? 0} user(s)
-                      </p>
-                      {(migrationResult.assignmentErrors?.length ?? 0) > 0 && (
-                        <p className="text-amber-300">
-                          {migrationResult.assignmentErrors!.length} assignment error(s):{" "}
-                          {migrationResult.assignmentErrors!.join("; ")}
-                        </p>
-                      )}
-                      {migrationResult.samlConfigured && (
-                        <div className="mt-3 pt-3 border-t border-green-500/30 space-y-1">
-                          <p className="font-medium">SAML configured automatically:</p>
-                          {(migrationResult.samlClaimsMapped ?? 0) > 0 && (
-                            <p>{migrationResult.samlClaimsMapped} attribute statement(s) mapped to claims policy</p>
-                          )}
-                          {migrationResult.samlCertExpiry && (
-                            <p>Signing certificate expires: {new Date(migrationResult.samlCertExpiry).toLocaleDateString()}</p>
-                          )}
-                          {migrationResult.samlSigningCertificate && (
-                            <details className="mt-2">
-                              <summary className="cursor-pointer text-xs font-medium">Show signing certificate (paste into your service provider)</summary>
-                              <pre className="mt-2 text-xs font-mono bg-black/30 border border-green-500/20 p-2 rounded overflow-auto max-h-40 whitespace-pre-wrap break-all">
-                                {migrationResult.samlSigningCertificate}
-                              </pre>
-                            </details>
-                          )}
-                          {(migrationResult.samlWarnings?.length ?? 0) > 0 && (
-                            <div className="text-amber-300 mt-1">
-                              {migrationResult.samlWarnings!.map((w, i) => (
-                                <p key={i}>{w}</p>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
+              {/* Compact migration acknowledgement. Full step-by-step detail is in
+                  the summary modal and the migration history; we keep only the SAML
+                  signing certificate here since it isn't persisted in history. */}
+              {migrationResult && (() => {
+                const st = migrationResult.success ? (migrationResult.status ?? "success") : "failed";
+                const tone =
+                  st === "success"
+                    ? "bg-green-500/10 text-green-200 border-green-500/30"
+                    : st === "partial"
+                      ? "bg-amber-500/10 text-amber-200 border-amber-500/30"
+                      : "bg-red-500/10 text-red-200 border-red-500/30";
+                const msg = !migrationResult.success
+                  ? `Migration failed — ${migrationResult.error ?? "see details"}`
+                  : st === "partial"
+                    ? `Migrated with warnings — “${migrationResult.displayName}” created in Entra ID`
+                    : `Migration complete — “${migrationResult.displayName}” created in Entra ID`;
+                return (
+                  <div className={`mb-4 rounded-lg text-sm border ${tone}`}>
+                    <div className="px-4 py-3 flex items-center justify-between gap-3">
+                      <span>{msg}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          detailAbortRef.current?.abort();
+                          setSelectedApp(null);
+                          setDetail(null);
+                          setMigrationResult(null);
+                        }}
+                        className="shrink-0 text-xs font-medium underline hover:no-underline"
+                      >
+                        View in history →
+                      </button>
                     </div>
-                  ) : (
-                    <>
-                      <strong>Migration failed:</strong> {migrationResult.error}
-                    </>
-                  )}
-                </div>
-              )}
+                    {migrationResult.samlSigningCertificate && (
+                      <details className="px-4 pb-3">
+                        <summary className="cursor-pointer text-xs font-medium">
+                          Show SAML signing certificate (paste into your service provider)
+                        </summary>
+                        <pre className="mt-2 text-xs font-mono bg-black/30 border border-line p-2 rounded overflow-auto max-h-40 whitespace-pre-wrap break-all">
+                          {migrationResult.samlSigningCertificate}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Detail Content */}
               {detailLoading && (
