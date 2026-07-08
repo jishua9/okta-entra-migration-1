@@ -19,9 +19,9 @@
 
   --input-solid: #171615; /* form-control fill (darker than panels) */
 
-  --primary: #d97757; /* Claude terracotta-orange accent */
-  --primary-hover: #c15f3c;
-  --primary-fg: #1f1206; /* text on the accent */
+  --primary: #ff671e; /* Quorum brand orange */
+  --primary-hover: #e85a15;
+  --primary-fg: #1f1206; /* dark text on the accent (accessible on the orange) */
 }
 
 @theme inline {

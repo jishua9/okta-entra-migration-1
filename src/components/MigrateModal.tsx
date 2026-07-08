@@ -11,6 +11,7 @@ import {
   ConfirmedPrincipal,
 } from "@/types/entra";
 import { getRedirectUris, getSamlSettings } from "@/lib/okta-utils";
+import Spinner from "@/components/Spinner";
 
 function principalKey(r: ResolvedAssignment): string {
   return `${r.principalType}:${r.sourceName}`;
@@ -481,7 +482,7 @@ export default function MigrateModal({ app, detail, migrating, result, onConfirm
 
         {migrating && (
           <p className="mt-5 text-xs text-muted flex items-center gap-2">
-            <span className="inline-block w-3.5 h-3.5 border-2 border-muted/30 border-t-primary rounded-full animate-spin" />
+            <Spinner className="w-3.5 h-3.5" />
             Creating the app registration and configuring SAML — this can take up to a
             minute while Entra ID replicates the new objects. Please don&apos;t close this window.
           </p>

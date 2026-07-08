@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getAppSecret } from "@/lib/secret";
 
-const PUBLIC_PREFIXES = ["/login", "/register", "/api/auth/"];
+const PUBLIC_PREFIXES = ["/login", "/register", "/api/auth/", "/quorum-mark.png"];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

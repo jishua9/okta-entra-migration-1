@@ -9,6 +9,7 @@ import {
   PreflightResult,
 } from "@/types/entra";
 import { getRedirectUris, getSamlSettings } from "@/lib/okta-utils";
+import Spinner from "@/components/Spinner";
 
 const STEP_META: Record<MigrationStep["status"], { icon: string; cls: string }> = {
   done: { icon: "✓", cls: "text-green-300" },
@@ -299,9 +300,7 @@ export default function BulkMigrateModal({
                     )}
                   </div>
                   {/* Right-side status icon during run */}
-                  {p.status === "migrating" && (
-                    <span className="inline-block w-4 h-4 border-2 border-muted/30 border-t-primary rounded-full animate-spin shrink-0" />
-                  )}
+                  {p.status === "migrating" && <Spinner className="w-4 h-4" />}
                 </div>
 
                 {/* Expanded per-app step summary */}
