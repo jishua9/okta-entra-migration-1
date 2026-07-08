@@ -17,11 +17,12 @@ function principalKey(r: ResolvedAssignment): string {
 interface Props {
   app: OktaApp;
   detail: OktaAppDetail;
+  migrating: boolean;
   onConfirm: (payload: MigrateConfirmPayload) => void;
   onCancel: () => void;
 }
 
-export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props) {
+export default function MigrateModal({ app, detail, migrating, onConfirm, onCancel }: Props) {
   const isSaml = app.signOnMode === "SAML_2_0";
   const samlSettings = getSamlSettings(app);
 
@@ -75,11 +76,12 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
+      // Don't allow closing the modal mid-migration.
+      if (e.key === "Escape" && !migrating) onCancel();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onCancel]);
+  }, [onCancel, migrating]);
 
   const duplicate = !checkingDuplicate
     ? entraApps.find((a) => a.displayName.toLowerCase() === displayName.trim().toLowerCase())
@@ -128,7 +130,7 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
   return (
     <div
       className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-      onClick={onCancel}
+      onClick={migrating ? undefined : onCancel}
     >
       <div
         className="bg-panel border border-line rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto"
@@ -350,21 +352,33 @@ export default function MigrateModal({ app, detail, onConfirm, onCancel }: Props
           </div>
         </div>
 
+        {migrating && (
+          <p className="mt-5 text-xs text-muted flex items-center gap-2">
+            <span className="inline-block w-3.5 h-3.5 border-2 border-muted/30 border-t-primary rounded-full animate-spin" />
+            Creating the app registration and configuring SAML — this can take up to a
+            minute while Entra ID replicates the new objects. Please don&apos;t close this window.
+          </p>
+        )}
+
         <div className="flex justify-end gap-3 mt-6">
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 text-sm border border-line text-foreground rounded-lg hover:bg-panel-hover transition"
+            disabled={migrating}
+            className="px-4 py-2 text-sm border border-line text-foreground rounded-lg hover:bg-panel-hover disabled:opacity-50 disabled:cursor-not-allowed transition"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={!displayName.trim()}
-            className="px-4 py-2 text-sm bg-primary text-primary-fg rounded-lg hover:bg-primary-hover disabled:opacity-50 transition"
+            disabled={!displayName.trim() || migrating}
+            className="px-4 py-2 text-sm bg-primary text-primary-fg rounded-lg hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition inline-flex items-center gap-2"
           >
-            Create in Entra ID
+            {migrating && (
+              <span className="inline-block w-4 h-4 border-2 border-primary-fg/40 border-t-primary-fg rounded-full animate-spin" />
+            )}
+            {migrating ? "Migrating…" : "Create in Entra ID"}
           </button>
         </div>
       </div>

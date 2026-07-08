@@ -119,11 +119,16 @@ async function configureSaml(
   created: CreatedState,
   warnings: string[],
 ): Promise<SamlConfigResult> {
-  // Reply / ACS URL on the service principal.
+  // Reply / ACS URL on the service principal. Right after instantiate the SP and
+  // its backing application may not be replication-consistent yet, surfacing as a
+  // 404 ("does not exist") or a 400 ("properties … do not match the application
+  // object"); retry through both while replication settles.
   if (payload.samlAcsUrl) {
     try {
-      await withRetry(() =>
-        client.api(`/servicePrincipals/${spId}`).patch({ replyUrls: [payload.samlAcsUrl] }),
+      await withRetry(
+        () =>
+          client.api(`/servicePrincipals/${spId}`).patch({ replyUrls: [payload.samlAcsUrl] }),
+        { retryOn: [400, 404], retries: 6 },
       );
     } catch (e) {
       warnings.push(
@@ -135,10 +140,12 @@ async function configureSaml(
   // SAML relay state on the service principal.
   if (payload.samlRelayState) {
     try {
-      await withRetry(() =>
-        client.api(`/servicePrincipals/${spId}`).patch({
-          samlSingleSignOnSettings: { relayState: payload.samlRelayState },
-        }),
+      await withRetry(
+        () =>
+          client.api(`/servicePrincipals/${spId}`).patch({
+            samlSingleSignOnSettings: { relayState: payload.samlRelayState },
+          }),
+        { retryOn: [404], retries: 6 },
       );
     } catch (e) {
       warnings.push(
@@ -151,10 +158,12 @@ async function configureSaml(
   // unverified domains — that is a warning, not a rollback.
   if (payload.samlEntityId) {
     try {
-      await withRetry(() =>
-        client.api(`/applications/${appObjectId}`).patch({
-          identifierUris: [payload.samlEntityId],
-        }),
+      await withRetry(
+        () =>
+          client.api(`/applications/${appObjectId}`).patch({
+            identifierUris: [payload.samlEntityId],
+          }),
+        { retryOn: [404], retries: 6 },
       );
     } catch (e) {
       warnings.push(
@@ -209,23 +218,28 @@ async function configureSaml(
     endDateTime.setFullYear(endDateTime.getFullYear() + 3);
     const endDateTimeIso = endDateTime.toISOString();
 
-    const cert = await withRetry(() =>
-      client.api(`/servicePrincipals/${spId}/addTokenSigningCertificate`).post({
-        displayName: `CN=${payload.displayName}`,
-        endDateTime: endDateTimeIso,
-      }),
+    const cert = await withRetry(
+      () =>
+        client.api(`/servicePrincipals/${spId}/addTokenSigningCertificate`).post({
+          displayName: `CN=${payload.displayName}`,
+          endDateTime: endDateTimeIso,
+        }),
+      { retryOn: [404], retries: 6 },
     );
 
-    await withRetry(() =>
-      client.api(`/servicePrincipals/${spId}`).patch({
-        preferredTokenSigningKeyThumbprint: cert.thumbprint,
-      }),
+    await withRetry(
+      () =>
+        client.api(`/servicePrincipals/${spId}`).patch({
+          preferredTokenSigningKeyThumbprint: cert.thumbprint,
+        }),
+      { retryOn: [404], retries: 6 },
     );
 
     let publicKey: string | undefined = cert.key;
     if (!publicKey) {
-      const sp = await withRetry(() =>
-        client.api(`/servicePrincipals/${spId}`).select("keyCredentials").get(),
+      const sp = await withRetry(
+        () => client.api(`/servicePrincipals/${spId}`).select("keyCredentials").get(),
+        { retryOn: [404], retries: 6 },
       );
       const found = selectSigningCert((sp.keyCredentials ?? []) as KeyCredential[]);
       publicKey = found?.key;
@@ -444,8 +458,15 @@ export async function resolveAssignments(
 
   let entityIdValidation;
   if (entityId) {
-    const domains = await getVerifiedDomains(config);
-    entityIdValidation = validateIdentifierUri(entityId, domains);
+    try {
+      const domains = await getVerifiedDomains(config);
+      entityIdValidation = validateIdentifierUri(entityId, domains);
+    } catch {
+      // Reading /domains needs Domain.Read.All / Directory.Read.All, which this
+      // tool does not require. Skip Entity ID domain validation rather than
+      // failing the whole preflight (group/user resolution still succeeds).
+      entityIdValidation = undefined;
+    }
   }
   return { groups: groupResults, users: userResults, entityIdValidation };
 }

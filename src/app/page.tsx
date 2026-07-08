@@ -36,6 +36,7 @@ export default function HomePage() {
   const detailAbortRef = useRef<AbortController | null>(null);
 
   const [showMigrateModal, setShowMigrateModal] = useState(false);
+  const [migrating, setMigrating] = useState(false);
   const [migrationResult, setMigrationResult] = useState<MigrationResult | null>(null);
 
   const { history, refresh } = useMigrationHistory();
@@ -116,8 +117,8 @@ export default function HomePage() {
 
   async function handleMigrate({ displayName, replyUrls, samlAcsUrl, samlEntityId, confirmedPrincipals }: MigrateConfirmPayload) {
     if (!selectedApp || !detail) return;
-    setShowMigrateModal(false);
     setMigrationResult(null);
+    setMigrating(true);
     const saml = getSamlSettings(detail.app);
     try {
       const res = await fetch("/api/entra/migrate", {
@@ -149,6 +150,9 @@ export default function HomePage() {
         success: false,
         error: e instanceof Error ? e.message : "Unknown error",
       });
+    } finally {
+      setMigrating(false);
+      setShowMigrateModal(false);
     }
   }
 
@@ -402,6 +406,7 @@ export default function HomePage() {
         <MigrateModal
           app={selectedApp}
           detail={detail}
+          migrating={migrating}
           onConfirm={handleMigrate}
           onCancel={() => setShowMigrateModal(false)}
         />
