@@ -18,7 +18,11 @@ export async function proxy(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("callbackUrl", request.url);
+    // Use a relative callbackUrl (path + query only). In `next start`, middleware's
+    // request.url host resolves to localhost regardless of the Host header, so an
+    // absolute callbackUrl would redirect post-login to localhost — unreachable when
+    // the app is accessed over the LAN IP. A relative path stays on the current host.
+    loginUrl.searchParams.set("callbackUrl", request.nextUrl.pathname + request.nextUrl.search);
     return NextResponse.redirect(loginUrl);
   }
 

@@ -8,7 +8,15 @@ import Link from "next/link";
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") ?? "/";
+  // Only honor a relative callbackUrl. An absolute URL (e.g. a stale
+  // "http://localhost:3000/" left in a bookmarked/open login tab, or an
+  // attacker-supplied host) would redirect off-host after login. Reject
+  // absolute ("http://…") and protocol-relative ("//host") values.
+  const rawCallback = searchParams.get("callbackUrl");
+  const callbackUrl =
+    rawCallback && rawCallback.startsWith("/") && !rawCallback.startsWith("//")
+      ? rawCallback
+      : "/";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
