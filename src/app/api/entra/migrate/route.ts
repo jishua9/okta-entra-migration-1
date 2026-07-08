@@ -59,6 +59,15 @@ export async function POST(req: Request) {
   if (confirmedPrincipals.length) {
     const a = await assignAppMembers(appResult.entraSPId, confirmedPrincipals, entraConfig);
     assignedGroups = a.assignedGroups; assignedUsers = a.assignedUsers; assignmentErrors = a.errors;
+    appResult.steps.push({
+      label: "Assignments",
+      status: assignmentErrors.length ? "warning" : "done",
+      detail:
+        `${assignedGroups} group(s), ${assignedUsers} user(s)` +
+        (assignmentErrors.length ? ` · ${assignmentErrors.length} failed` : ""),
+    });
+  } else {
+    appResult.steps.push({ label: "Assignments", status: "skipped", detail: "none selected" });
   }
 
   const warnings = appResult.warnings ?? [];
@@ -79,6 +88,7 @@ export async function POST(req: Request) {
     entraObjectId: appResult.entraObjectId,
     displayName: appResult.displayName,
     assignedGroups, assignedUsers, assignmentErrors,
+    steps: appResult.steps,
     samlConfigured: appResult.samlConfigured,
     samlSigningCertificate: appResult.samlSigningCertificate,
     samlCertExpiry: appResult.samlCertExpiry,

@@ -4,6 +4,7 @@ import { TokenCredentialAuthenticationProvider } from "@microsoft/microsoft-grap
 import {
   ConfirmedPrincipal,
   EntraAppPayload,
+  MigrationStep,
   PreflightResult,
   ResolvedAssignment,
 } from "@/types/entra";
@@ -118,26 +119,32 @@ async function configureSaml(
   payload: EntraAppPayload,
   created: CreatedState,
   warnings: string[],
+  steps: MigrationStep[],
 ): Promise<SamlConfigResult> {
-  // Reply / ACS URL on the service principal. Right after instantiate the SP and
-  // its backing application may not be replication-consistent yet, surfacing as a
-  // 404 ("does not exist") or a 400 ("properties … do not match the application
-  // object"); retry through both while replication settles.
+  // Reply / ACS URL. Per Microsoft's SAML-SSO Graph guidance this is the
+  // application's web.redirectUris, NOT the service principal's replyUrls —
+  // setting it on the SP fails with "properties … do not match the application
+  // object". Newly instantiated objects can lag in replication (404); retry.
   if (payload.samlAcsUrl) {
     try {
       await withRetry(
         () =>
-          client.api(`/servicePrincipals/${spId}`).patch({ replyUrls: [payload.samlAcsUrl] }),
-        { retryOn: [400, 404], retries: 6 },
+          client.api(`/applications/${appObjectId}`).patch({
+            web: { redirectUris: [payload.samlAcsUrl] },
+          }),
+        { retryOn: [404], retries: 6 },
       );
+      steps.push({ label: "ACS / reply URL", status: "done", detail: payload.samlAcsUrl });
     } catch (e) {
-      warnings.push(
-        `Could not set reply/ACS URL: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      const msg = e instanceof Error ? e.message : String(e);
+      warnings.push(`Could not set reply/ACS URL: ${msg}`);
+      steps.push({ label: "ACS / reply URL", status: "failed", detail: msg });
     }
+  } else {
+    steps.push({ label: "ACS / reply URL", status: "skipped", detail: "none provided" });
   }
 
-  // SAML relay state on the service principal.
+  // SAML relay state on the service principal (only when Okta supplied one).
   if (payload.samlRelayState) {
     try {
       await withRetry(
@@ -147,10 +154,11 @@ async function configureSaml(
           }),
         { retryOn: [404], retries: 6 },
       );
+      steps.push({ label: "Relay state", status: "done", detail: payload.samlRelayState });
     } catch (e) {
-      warnings.push(
-        `Could not set SAML relay state: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      const msg = e instanceof Error ? e.message : String(e);
+      warnings.push(`Could not set SAML relay state: ${msg}`);
+      steps.push({ label: "Relay state", status: "failed", detail: msg });
     }
   }
 
@@ -165,11 +173,14 @@ async function configureSaml(
           }),
         { retryOn: [404], retries: 6 },
       );
+      steps.push({ label: "Entity ID", status: "done", detail: payload.samlEntityId });
     } catch (e) {
-      warnings.push(
-        `Could not set Entity ID "${payload.samlEntityId}": ${e instanceof Error ? e.message : String(e)}`,
-      );
+      const msg = e instanceof Error ? e.message : String(e);
+      warnings.push(`Could not set Entity ID "${payload.samlEntityId}": ${msg}`);
+      steps.push({ label: "Entity ID", status: "failed", detail: msg });
     }
+  } else {
+    steps.push({ label: "Entity ID", status: "skipped", detail: "none provided" });
   }
 
   // Claims mapping policy.
@@ -203,11 +214,26 @@ async function configureSaml(
         }),
       );
       claimsMapped = schema.length;
+      steps.push({
+        label: "Claims mapping",
+        status: "done",
+        detail: `${schema.length} attribute statement(s) mapped`,
+      });
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       warnings.push(
-        `Claims mapping policy could not be created/assigned (requires Policy.ReadWrite.ApplicationConfiguration permission): ${e instanceof Error ? e.message : String(e)}`,
+        `Claims mapping policy could not be created/assigned (requires Policy.ReadWrite.ApplicationConfiguration permission): ${msg}`,
       );
+      steps.push({ label: "Claims mapping", status: "failed", detail: msg });
     }
+  } else {
+    steps.push({
+      label: "Claims mapping",
+      status: "skipped",
+      detail: claimWarnings.length
+        ? "no attributes could be mapped automatically"
+        : "no attribute statements",
+    });
   }
 
   // SAML token signing certificate (THE FIX) + activation.
@@ -246,10 +272,15 @@ async function configureSaml(
     }
     if (publicKey) signingCertificate = keyToPem(publicKey);
     certExpiry = endDateTimeIso;
+    steps.push({
+      label: "Signing certificate",
+      status: "done",
+      detail: `expires ${endDateTimeIso.slice(0, 10)}`,
+    });
   } catch (e) {
-    warnings.push(
-      `Could not generate/activate SAML signing certificate: ${e instanceof Error ? e.message : String(e)}`,
-    );
+    const msg = e instanceof Error ? e.message : String(e);
+    warnings.push(`Could not generate/activate SAML signing certificate: ${msg}`);
+    steps.push({ label: "Signing certificate", status: "failed", detail: msg });
   }
 
   return { signingCertificate, certExpiry, claimsMapped };
@@ -264,6 +295,7 @@ export async function createEntraApplication(
   entraSPId: string;
   displayName: string;
   warnings: string[];
+  steps: MigrationStep[];
   samlConfigured?: boolean;
   samlSigningCertificate?: string;
   samlCertExpiry?: string;
@@ -272,6 +304,7 @@ export async function createEntraApplication(
 }> {
   const client = makeGraphClient(config);
   const warnings: string[] = [];
+  const steps: MigrationStep[] = [];
   const created: CreatedState = {};
 
   let appObjectId: string;
@@ -290,6 +323,8 @@ export async function createEntraApplication(
     appId = res.application.appId;
     created.appObjectId = appObjectId;
     created.spId = spId;
+    steps.push({ label: "App registration", status: "done", detail: appId });
+    steps.push({ label: "Service principal", status: "done", detail: spId });
 
     // Newly instantiated objects can lag in replication; tolerate 404s here.
     if (payload.signOnMode === "SAML_2_0") {
@@ -300,6 +335,7 @@ export async function createEntraApplication(
           }),
         { retryOn: [404], retries: 6 },
       );
+      steps.push({ label: "SAML sign-on mode", status: "done" });
     } else if (payload.replyUrls?.length) {
       await withRetry(
         () =>
@@ -311,6 +347,11 @@ export async function createEntraApplication(
           }),
         { retryOn: [404], retries: 6 },
       );
+      steps.push({
+        label: "Redirect URIs",
+        status: "done",
+        detail: `${payload.replyUrls.length} URI(s)`,
+      });
     }
   } catch (e) {
     const rollbackResult = await rollback(client, created);
@@ -320,7 +361,7 @@ export async function createEntraApplication(
   // ---- CONFIGURATION steps (SAML only): failures warn, never rollback. ----
   let samlResult: SamlConfigResult | undefined;
   if (payload.signOnMode === "SAML_2_0") {
-    samlResult = await configureSaml(client, appObjectId, spId, payload, created, warnings);
+    samlResult = await configureSaml(client, appObjectId, spId, payload, created, warnings, steps);
   }
 
   return {
@@ -329,6 +370,7 @@ export async function createEntraApplication(
     entraSPId: spId,
     displayName: payload.displayName,
     warnings,
+    steps,
     ...(samlResult
       ? {
           samlConfigured: true,

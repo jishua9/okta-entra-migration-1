@@ -151,8 +151,9 @@ export default function HomePage() {
         error: e instanceof Error ? e.message : "Unknown error",
       });
     } finally {
+      // Keep the modal open so it flips to the result summary; the user closes
+      // it with "Done". A fresh migration clears the result at the top of this fn.
       setMigrating(false);
-      setShowMigrateModal(false);
     }
   }
 
@@ -317,7 +318,7 @@ export default function HomePage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShowMigrateModal(true)}
+                    onClick={() => { setMigrationResult(null); setShowMigrateModal(true); }}
                     disabled={!detail}
                     className="px-4 py-2 text-sm bg-primary text-primary-fg rounded-lg hover:bg-primary-hover disabled:opacity-50 transition"
                   >
@@ -407,6 +408,7 @@ export default function HomePage() {
           app={selectedApp}
           detail={detail}
           migrating={migrating}
+          result={migrationResult}
           onConfirm={handleMigrate}
           onCancel={() => setShowMigrateModal(false)}
         />

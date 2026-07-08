@@ -17,6 +17,13 @@ export interface EntraAppPayload {
   confirmedPrincipals?: ConfirmedPrincipal[];
 }
 
+// A single migration action and how it ended up — drives the result summary UI.
+export interface MigrationStep {
+  label: string;
+  status: "done" | "warning" | "skipped" | "failed";
+  detail?: string;
+}
+
 export interface MigrationResult {
   success: boolean;
   entraAppId?: string;
@@ -31,6 +38,7 @@ export interface MigrationResult {
   samlCertExpiry?: string;
   samlClaimsMapped?: number;
   samlWarnings?: string[];
+  steps?: MigrationStep[];
   status?: "success" | "failed" | "partial";
   rollbackPerformed?: boolean;
   rollbackErrors?: string[];

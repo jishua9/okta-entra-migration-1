@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { OktaApp, OktaAppDetail } from "@/types/okta";
 import {
   MigrateConfirmPayload,
+  MigrationResult,
+  MigrationStep,
   PreflightResult,
   ResolvedAssignment,
   ConfirmedPrincipal,
@@ -14,15 +16,135 @@ function principalKey(r: ResolvedAssignment): string {
   return `${r.principalType}:${r.sourceName}`;
 }
 
+const STEP_META: Record<MigrationStep["status"], { icon: string; cls: string }> = {
+  done: { icon: "✓", cls: "text-green-300" },
+  warning: { icon: "⚠", cls: "text-amber-300" },
+  failed: { icon: "✗", cls: "text-red-300" },
+  skipped: { icon: "–", cls: "text-faint" },
+};
+
+// Post-migration summary: what moved across, what degraded, and the new IDs.
+function MigrationSummary({
+  result,
+  onClose,
+}: {
+  result: MigrationResult;
+  onClose: () => void;
+}) {
+  const status = result.success ? (result.status ?? "success") : "failed";
+  const heading =
+    status === "success"
+      ? "Migration complete"
+      : status === "partial"
+        ? "Migrated with warnings"
+        : "Migration failed";
+  const headingCls =
+    status === "success"
+      ? "text-green-300"
+      : status === "partial"
+        ? "text-amber-300"
+        : "text-red-300";
+
+  return (
+    <>
+      <div className="flex items-center gap-2 mb-1">
+        <h2 className={`text-lg font-semibold ${headingCls}`}>{heading}</h2>
+      </div>
+      <p className="text-sm text-muted mb-5">
+        {result.displayName ? `“${result.displayName}” — ` : ""}
+        summary of what moved across to Entra ID.
+      </p>
+
+      {!result.success ? (
+        <div className="text-sm text-red-200 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-3">
+          {result.error ?? "The migration failed."}
+          {result.rollbackPerformed && (
+            <p className="mt-1 text-xs text-muted">
+              The partially-created app was rolled back.
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Step-by-step outcome */}
+          <ul className="space-y-1.5">
+            {(result.steps ?? []).map((s, i) => {
+              const meta = STEP_META[s.status];
+              return (
+                <li key={i} className="flex items-start gap-2 text-sm">
+                  <span className={`mt-0.5 font-semibold ${meta.cls}`}>{meta.icon}</span>
+                  <span className="text-foreground">{s.label}</span>
+                  {s.detail && (
+                    <span className="text-faint break-all">— {s.detail}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+
+          {/* New Entra identifiers */}
+          <div className="border border-line rounded-lg p-3 space-y-1 text-xs">
+            {result.entraAppId && (
+              <p className="text-muted">
+                Application (client) ID:{" "}
+                <span className="font-mono text-foreground break-all">{result.entraAppId}</span>
+              </p>
+            )}
+            {result.entraObjectId && (
+              <p className="text-muted">
+                Object ID:{" "}
+                <span className="font-mono text-foreground break-all">{result.entraObjectId}</span>
+              </p>
+            )}
+          </div>
+
+          {/* SAML signing certificate */}
+          {result.samlSigningCertificate && (
+            <details>
+              <summary className="cursor-pointer text-xs font-medium text-muted">
+                Show SAML signing certificate (paste into your service provider)
+              </summary>
+              <pre className="mt-2 text-xs font-mono bg-black/30 border border-line p-2 rounded overflow-auto max-h-40 whitespace-pre-wrap break-all text-foreground">
+                {result.samlSigningCertificate}
+              </pre>
+            </details>
+          )}
+
+          {/* Anything that needs a manual follow-up */}
+          {(result.assignmentErrors?.length ?? 0) > 0 && (
+            <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2 space-y-0.5">
+              <p className="font-medium">Assignment issues:</p>
+              {result.assignmentErrors!.map((e, i) => (
+                <p key={i}>• {e}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex justify-end mt-6">
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-4 py-2 text-sm bg-primary text-primary-fg rounded-lg hover:bg-primary-hover transition"
+        >
+          Done
+        </button>
+      </div>
+    </>
+  );
+}
+
 interface Props {
   app: OktaApp;
   detail: OktaAppDetail;
   migrating: boolean;
+  result: MigrationResult | null;
   onConfirm: (payload: MigrateConfirmPayload) => void;
   onCancel: () => void;
 }
 
-export default function MigrateModal({ app, detail, migrating, onConfirm, onCancel }: Props) {
+export default function MigrateModal({ app, detail, migrating, result, onConfirm, onCancel }: Props) {
   const isSaml = app.signOnMode === "SAML_2_0";
   const samlSettings = getSamlSettings(app);
 
@@ -136,6 +258,10 @@ export default function MigrateModal({ app, detail, migrating, onConfirm, onCanc
         className="bg-panel border border-line rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
+        {result ? (
+          <MigrationSummary result={result} onClose={onCancel} />
+        ) : (
+        <>
         <h2 className="text-lg font-semibold text-foreground mb-1">
           Migrate to Entra ID
         </h2>
@@ -381,6 +507,8 @@ export default function MigrateModal({ app, detail, migrating, onConfirm, onCanc
             {migrating ? "Migrating…" : "Create in Entra ID"}
           </button>
         </div>
+        </>
+        )}
       </div>
     </div>
   );
